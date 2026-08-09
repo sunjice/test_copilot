@@ -88,6 +88,13 @@ const TaskAPI = {
       data,
     });
   },
+
+  stop(taskId: string) {
+    return request({
+      url: `${TASK_BASE_URL}/${taskId}/stop`,
+      method: "post",
+    });
+  },
 };
 
 export default TaskAPI;

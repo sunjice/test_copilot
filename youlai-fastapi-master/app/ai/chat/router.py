@@ -2,7 +2,7 @@
 
 import asyncio
 import json
-from typing import AsyncGenerator
+from typing import Any, AsyncGenerator
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import StreamingResponse
@@ -31,12 +31,23 @@ from app.aitc.task.engine import TaskEngine
 router = APIRouter(prefix="/api/v1/aitc/chat", tags=["AI对话"])
 
 
+def _get_owner_id(user: SysUserDetails) -> int | None:
+    """获取用于隔离的用户ID：超管返回 None（可见全部），普通用户返回 userId。"""
+    if user.isRoot:
+        return None
+    return user.userId
+
+
 # ═══════════════ 会话 ═══════════════
 
 @router.post("/sessions")
-async def create_session(req: SessionCreate, db: AsyncSession = Depends(get_db)):
+async def create_session(
+    req: SessionCreate,
+    db: AsyncSession = Depends(get_db),
+    user: SysUserDetails = Depends(get_current_user),
+):
     service = ChatService(db)
-    data = await service.create_session(req)
+    data = await service.create_session(req, user_id=user.userId)
     return Result(data=data)
 
 
@@ -44,41 +55,101 @@ async def create_session(req: SessionCreate, db: AsyncSession = Depends(get_db))
 async def list_sessions(
     domain: str | None = Query(None, description="域筛选"),
     db: AsyncSession = Depends(get_db),
+    user: SysUserDetails = Depends(get_current_user),
 ):
     service = ChatService(db)
-    data = await service.list_sessions(domain=domain)
+    owner_id = _get_owner_id(user)
+    data = await service.list_sessions(domain=domain, user_id=owner_id)
     return Result(data=data)
 
 
 @router.get("/sessions/{session_id}")
-async def get_session(session_id: int, db: AsyncSession = Depends(get_db)):
+async def get_session(
+    session_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: SysUserDetails = Depends(get_current_user),
+):
     service = ChatService(db)
-    data = await service.get_session(session_id)
+    data = await service.get_session(session_id, user_id=_get_owner_id(user))
     return Result(data=data)
 
 
 @router.put("/sessions/{session_id}")
 async def update_session(
-    session_id: int, req: SessionUpdate, db: AsyncSession = Depends(get_db)
+    session_id: int,
+    req: SessionUpdate,
+    db: AsyncSession = Depends(get_db),
+    user: SysUserDetails = Depends(get_current_user),
 ):
     service = ChatService(db)
-    data = await service.update_session(session_id, req)
+    data = await service.update_session(session_id, req, user_id=_get_owner_id(user))
     return Result(data=data)
 
 
 @router.delete("/sessions/{session_id}")
-async def delete_session(session_id: int, db: AsyncSession = Depends(get_db)):
+async def delete_session(
+    session_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: SysUserDetails = Depends(get_current_user),
+):
     service = ChatService(db)
-    await service.delete_session(session_id)
+    await service.delete_session(session_id, user_id=_get_owner_id(user))
     return Result(data=None, msg="删除成功")
 
 
 # ═══════════════ 消息 ═══════════════
 
+async def _stream_with_heartbeat(
+    stream: AsyncGenerator[str, None],
+    heartbeat_interval: float = 25.0,
+) -> AsyncGenerator[str, None]:
+    """消费异步生成器并返回 SSE 事件；长时间无输出时发送 heartbeat 注释。
+
+    注意：不要直接对同一个 async generator 反复调用 __anext__() 并 cancel，
+    否则会触发 `anext(): asynchronous generator is already running`。
+    这里使用独立的 consumer task + Queue 解耦心跳与生成器消费。
+    """
+    queue: asyncio.Queue[tuple[str, Any]] = asyncio.Queue()
+
+    async def _consumer() -> None:
+        try:
+            async for sse in stream:
+                await queue.put(("event", sse))
+            await queue.put(("done", None))
+        except Exception as exc:
+            await queue.put(("error", exc))
+
+    consumer = asyncio.create_task(_consumer())
+    try:
+        while True:
+            try:
+                kind, payload = await asyncio.wait_for(queue.get(), timeout=heartbeat_interval)
+            except asyncio.TimeoutError:
+                yield ": heartbeat\n\n"
+                continue
+
+            if kind == "done":
+                break
+            if kind == "error":
+                raise payload
+            yield payload
+            queue.task_done()
+    finally:
+        consumer.cancel()
+        try:
+            await consumer
+        except asyncio.CancelledError:
+            pass
+
+
 @router.get("/sessions/{session_id}/messages")
-async def list_messages(session_id: int, db: AsyncSession = Depends(get_db)):
+async def list_messages(
+    session_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: SysUserDetails = Depends(get_current_user),
+):
     service = ChatService(db)
-    data = await service.get_messages(session_id)
+    data = await service.get_messages(session_id, user_id=_get_owner_id(user))
     return Result(data=data)
 
 
@@ -87,16 +158,20 @@ async def send_message(
     session_id: int,
     req: MessageSendReq,
     db: AsyncSession = Depends(get_db),
+    user: SysUserDetails = Depends(get_current_user),
 ):
     """发送消息 — SSE 流式响应（不经过统一 Result 封装，直接返回 SSE 流）。"""
     service = ChatService(db)
+    owner_id = _get_owner_id(user)
+
+    # 0. 校验会话所有权
+    session = await service.get_session(session_id, user_id=owner_id)
 
     # 1. 保存用户消息
     await service.add_message(session_id, "user", req.content)
 
     # 2. 获取会话上下文
-    session = await service.get_session(session_id)
-    history = await service.get_message_history(session_id, limit=30)
+    history = await service.get_message_history(session_id, limit=30, user_id=owner_id)
     context = SessionContext(
         session_id=session_id,
         domain=session.domain,
@@ -127,19 +202,8 @@ async def send_message(
                 req.content, context, history
             )
             # 用 heartbeat 包裹：工具执行期间可能 30-60s 无输出，每 25s 发 : heartbeat 防止代理断连
-            while True:
-                try:
-                    next_event = asyncio.ensure_future(stream.__anext__())
-                    done, _ = await asyncio.wait([next_event], timeout=25)
-                    if done:
-                        sse = next_event.result()
-                        yield sse
-                    else:
-                        next_event.cancel()
-                        yield ": heartbeat\n\n"
-                        continue
-                except StopAsyncIteration:
-                    break
+            async for sse in _stream_with_heartbeat(stream, heartbeat_interval=25):
+                yield sse
 
                 # 收集 assistant 消息内容 — SSE 是多行字符串(event:xxx\ndata:{...})，需按行解析
                 for line in sse.splitlines():
@@ -217,17 +281,26 @@ async def send_message(
 # ═══════════════ 草稿 ═══════════════
 
 @router.get("/drafts/{draft_id}")
-async def get_draft(draft_id: int, db: AsyncSession = Depends(get_db)):
+async def get_draft(
+    draft_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: SysUserDetails = Depends(get_current_user),
+):
     service = ChatService(db)
-    data = await service.get_draft(draft_id)
+    data = await service.get_draft(draft_id, user_id=_get_owner_id(user))
     return Result(data=data)
 
 
 @router.post("/drafts/{draft_id}/confirm")
-async def confirm_draft(draft_id: int, req: DraftConfirmReq, db: AsyncSession = Depends(get_db)):
+async def confirm_draft(
+    draft_id: int,
+    req: DraftConfirmReq,
+    db: AsyncSession = Depends(get_db),
+    user: SysUserDetails = Depends(get_current_user),
+):
     """确认草稿：confirm 确认 / discard 丢弃。"""
     service = ChatService(db)
-    data = await service.confirm_draft(draft_id, req)
+    data = await service.confirm_draft(draft_id, req, user_id=_get_owner_id(user))
     # 回写 draft_card 消息的 metadata_json
     await service.update_message_metadata_by_draft_id(draft_id, {"draft_status": req.action})
     return Result(data=data)
@@ -236,9 +309,15 @@ async def confirm_draft(draft_id: int, req: DraftConfirmReq, db: AsyncSession = 
 # ═══════════════ 确认卡片 ═══════════════
 
 @router.post("/sessions/{session_id}/cancel-confirm")
-async def cancel_confirm(session_id: int, db: AsyncSession = Depends(get_db)):
+async def cancel_confirm(
+    session_id: int,
+    db: AsyncSession = Depends(get_db),
+    user: SysUserDetails = Depends(get_current_user),
+):
     """用户取消 confirm_card 创建任务，回写消息状态。"""
     service = ChatService(db)
+    # 校验会话所有权
+    await service.get_session(session_id, user_id=_get_owner_id(user))
     await service.update_last_confirm_card_metadata(session_id, {"confirm_status": "cancelled"})
     return Result(data=None, msg="已取消")
 
@@ -248,9 +327,12 @@ async def update_card_status(
     session_id: int,
     req: UpdateCardStatusReq,
     db: AsyncSession = Depends(get_db),
+    user: SysUserDetails = Depends(get_current_user),
 ):
     """通用卡片状态更新：更新会话中最后一条指定类型卡片的 metadata。"""
     service = ChatService(db)
+    # 校验会话所有权
+    await service.get_session(session_id, user_id=_get_owner_id(user))
     await service.update_last_card_metadata_by_type(session_id, req.msg_type, req.metadata)
     return Result(data=None, msg="卡片状态已更新")
 
@@ -258,10 +340,15 @@ async def update_card_status(
 # ═══════════════ 上下文 ═══════════════
 
 @router.post("/context")
-async def set_context(session_id: int, req: ContextSetReq, db: AsyncSession = Depends(get_db)):
+async def set_context(
+    session_id: int,
+    req: ContextSetReq,
+    db: AsyncSession = Depends(get_db),
+    user: SysUserDetails = Depends(get_current_user),
+):
     """页面切换时更新会话上下文。"""
     service = ChatService(db)
-    await service.set_context(session_id, req)
+    await service.set_context(session_id, req, user_id=_get_owner_id(user))
     return Result(data=None, msg="上下文已更新")
 
 
@@ -316,7 +403,7 @@ async def confirm_create_task(
     )
 
     # 保存 assistant 确认消息
-    task_type_label = {"core_select": "挑选核心用例", "case_review": "用例审核", "script_gen": "生成测试脚本"}.get(req.skill_name, req.skill_name)
+    task_type_label = {"core_select": "挑选核心用例", "case_review": "用例审核", "script_gen": "生成测试脚本", "case_complete": "补全用例字段"}.get(req.skill_name, req.skill_name)
     total_count = task_vo.total_count
     scope_desc = f"已选中的 {total_count} 条" if req.case_ids else "当前模块下的"
     content = f"已创建{task_type_label}任务，将对{scope_desc}用例逐条处理。完成后可点击查看。"

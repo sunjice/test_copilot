@@ -1,0 +1,53 @@
+请根据用例的「名称」和「测试目的」，参考同模块样本用例的写法，
+补全以下用例的缺失字段。每个字段必须参考样本用例中对应字段的写法风格、粒度、术语表达。
+如果有现有值但不够完善，也可以进行改进。
+
+补全指引：
+1. 测试思想（summary）：应清晰说明测试策略、风险点和验证目标，体现测试设计思路。
+2. 前置条件（preconditions）：应完整列出执行测试前必须满足的环境、数据、权限等条件。
+3. 测试数据（test_data）：应明确列出测试所需的具体数据内容、格式和来源。
+4. 测试拓扑（topo）：应描述测试的网络拓扑、服务依赖关系。
+5. 测试步骤（steps）：每步应包含明确的操作(action)和可验证的预期结果(expected)，
+   步骤逻辑连贯无歧义，新手也能无歧义理解。参考样本用例中步骤的 action/expected 格式。
+
+{{specs}}
+
+{{samples}}
+
+返回 JSON：
+{
+  "overall_note": "整体补全说明...",
+  "fields": [
+    {
+      "field_name": "summary",
+      "original": "",
+      "suggested_value": "验证在并发场景下用户登录接口的幂等性..."
+    },
+    {
+      "field_name": "preconditions",
+      "original": "",
+      "suggested_value": "已部署v2.3版本服务，数据库包含1000条用户记录..."
+    },
+    {
+      "field_name": "test_data",
+      "original": "",
+      "suggested_value": "账号: test_user_001, 密码: Abc12345, 角色: 普通用户"
+    },
+    {
+      "field_name": "topo",
+      "original": "",
+      "suggested_value": "客户端 → Nginx → API Gateway → 用户服务 → MySQL"
+    },
+    {
+      "field_name": "steps",
+      "original": [],
+      "suggested_value": [
+        {"step_no": 1, "action": "打开登录页面", "expected": "页面正常加载，显示用户名和密码输入框"},
+        {"step_no": 2, "action": "输入正确账号密码，点击登录", "expected": "登录成功，跳转到首页"}
+      ]
+    }
+  ]
+}
+
+用例内容：
+{{case}}

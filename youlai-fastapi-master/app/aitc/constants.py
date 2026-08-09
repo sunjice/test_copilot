@@ -37,6 +37,7 @@ class TaskType(str, Enum):
     CORE_SELECT = "core_select"
     CASE_REVIEW = "case_review"
     SCRIPT_GEN = "script_gen"
+    CASE_COMPLETE = "case_complete"
 
     @classmethod
     def labels(cls) -> dict:
@@ -44,6 +45,7 @@ class TaskType(str, Enum):
             cls.CORE_SELECT: "挑选核心用例",
             cls.CASE_REVIEW: "用例审核",
             cls.SCRIPT_GEN: "生成测试脚本",
+            cls.CASE_COMPLETE: "补全用例字段",
         }
 
 # ── 提示词场景（同 TaskType） ──
@@ -62,6 +64,7 @@ class TaskStatus(int, Enum):
     COMPLETED = 2    # 已完成
     FAILED = 3       # 失败
     CONFIRMED = 4    # 已确认
+    STOPPED = 5      # 已停止
 
 # ── 明细状态 ──
 
@@ -112,6 +115,7 @@ PERM_SAMPLE_DELETE = "aitc:sample:delete"
 PERM_TASK_CREATE  = "aitc:task:create"
 PERM_TASK_LIST    = "aitc:task:list"
 PERM_TASK_CONFIRM = "aitc:task:confirm"
+PERM_TASK_STOP    = "aitc:task:stop"
 
 PERM_SCRIPT_LIST   = "aitc:script:list"
 PERM_SCRIPT_UPDATE = "aitc:script:update"

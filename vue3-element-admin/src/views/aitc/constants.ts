@@ -3,7 +3,7 @@
  */
 import {
   TaskTypeEnum, TaskStatusEnum, ItemStatusEnum, ConfirmStatusEnum,
-  CaseImportanceEnum, CoreSourceEnum, ReviewStatusEnum, ReviewActionEnum,
+  CaseImportanceEnum, CoreSourceEnum, ReviewActionEnum,
   ScriptSourceEnum, ScriptStatusEnum, SampleTypeEnum, SpecTypeEnum,
 } from '@/enums/aitc'
 
@@ -12,6 +12,7 @@ export const TASK_TYPE_MAP: Record<string, { label: string; tag: string }> = {
   [TaskTypeEnum.CORE_SELECT]: { label: '挑核心', tag: 'success' },
   [TaskTypeEnum.CASE_REVIEW]: { label: '用例审核', tag: 'warning' },
   [TaskTypeEnum.SCRIPT_GEN]: { label: '生成脚本', tag: '' },
+  [TaskTypeEnum.CASE_COMPLETE]: { label: '完善用例', tag: '' },
 }
 
 export function taskTypeLabel(type: string): string {
@@ -19,7 +20,7 @@ export function taskTypeLabel(type: string): string {
 }
 
 export function taskTypeTag(type: string): string {
-  return TASK_TYPE_MAP[type]?.tag ?? ''
+  return TASK_TYPE_MAP[type]?.tag || 'info'
 }
 
 // ── 任务状态 标签/颜色 ──
@@ -29,6 +30,7 @@ export const TASK_STATUS_MAP: Record<number, { label: string; tag: string }> = {
   [TaskStatusEnum.COMPLETED]: { label: '已完成', tag: 'success' },
   [TaskStatusEnum.FAILED]:    { label: '失败',   tag: 'danger' },
   [TaskStatusEnum.CONFIRMED]: { label: '已确认', tag: 'success' },
+  [TaskStatusEnum.STOPPED]:   { label: '已停止', tag: 'info' },
 }
 
 export function statusLabel(status: number): string {

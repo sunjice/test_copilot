@@ -12,7 +12,7 @@ from app.aitc.task.schemas import (
 )
 from app.aitc.task.engine import TaskEngine
 from app.aitc.constants import (
-    PERM_TASK_CREATE, PERM_TASK_LIST, PERM_TASK_CONFIRM,
+    PERM_TASK_CREATE, PERM_TASK_LIST, PERM_TASK_CONFIRM, PERM_TASK_STOP,
 )
 
 router = APIRouter(tags=["AI任务"])
@@ -77,6 +77,13 @@ async def confirm_task_items(
     reviewer_ip = request.client.host if request and request.client else ""
     await engine.confirm_task_items(task_id, form, reviewed_by=user.username, reviewer_ip=reviewer_ip)
     return Result(msg="确认成功，结果已应用")
+
+
+@router.post("/tasks/{task_id}/stop", summary="停止任务", dependencies=[Depends(require_perm(PERM_TASK_STOP))])
+async def stop_task(task_id: int, db: AsyncSession = Depends(get_db)):
+    engine = TaskEngine(db)
+    await engine.stop_task(task_id)
+    return Result(msg="任务已停止")
 
 
 @router.get("/tasks/{task_id}/items/{item_id}", summary="获取单条任务明细+用例详情", dependencies=[Depends(require_perm(PERM_TASK_LIST))])

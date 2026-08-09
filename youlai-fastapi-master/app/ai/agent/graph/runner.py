@@ -403,22 +403,47 @@ async def _astream_with_timeout(
     graph_config: dict[str, Any],
     timeout: float,
 ) -> AsyncGenerator[dict[str, Any], None]:
-    """用 asyncio.wait_for 包裹 astream_events，超时后抛出 asyncio.TimeoutError。"""
+    """消费 LangGraph astream_events，单事件超时后触发 on_timeout。
+
+    使用独立 consumer task + Queue 解耦超时与生成器消费，避免对同一个
+    async generator 的 __anext__() 直接 wait_for/cancel 导致
+    `anext(): asynchronous generator is already running`。
+    """
+    queue: asyncio.Queue[Any] = asyncio.Queue()
     agen = graph.astream_events(state, graph_config, version="v2")
+
+    async def _consumer() -> None:
+        try:
+            async for event in agen:
+                await queue.put(event)
+            await queue.put(None)  # sentinel: done
+        except Exception as exc:
+            await queue.put(exc)
+
+    consumer = asyncio.create_task(_consumer())
     try:
         while True:
             try:
-                event = await asyncio.wait_for(agen.__anext__(), timeout=timeout)
-                yield event
-            except StopAsyncIteration:
-                break
+                event = await asyncio.wait_for(queue.get(), timeout=timeout)
             except asyncio.TimeoutError:
                 yield {
                     "event": "on_timeout",
                     "data": {"message": f"Agent 执行超时（{timeout}秒），请简化请求后重试"},
                 }
                 break
+
+            if event is None:
+                break
+            if isinstance(event, Exception):
+                raise event
+            yield event
+            queue.task_done()
     finally:
+        consumer.cancel()
+        try:
+            await consumer
+        except asyncio.CancelledError:
+            pass
         await agen.aclose()
 
 

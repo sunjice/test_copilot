@@ -96,6 +96,12 @@ export const constantRoutes: RouteRecordRaw[] = [
         meta: { title: "用例逐条审核", hidden: true },
       },
       {
+        path: "aitc/tasks/:taskId(\\d+)/case-complete/:itemId(\\d+)",
+        name: "AitcCaseComplete",
+        component: () => import("@/views/aitc/task/case_complete/ReviewPage.vue"),
+        meta: { title: "完善用例", hidden: true },
+      },
+      {
         path: "aitc/tasks/:taskId(\\d+)/script-review/:itemId(\\d+)",
         name: "ScriptReview",
         component: () => import("@/views/aitc/task/script_gen/ReviewPage.vue"),

@@ -35,6 +35,14 @@
 
     <div class="flex gap-2">
       <el-button
+        v-if="task?.status === TaskStatusEnum.QUEUED || task?.status === TaskStatusEnum.RUNNING"
+        type="danger"
+        v-hasPerm="'aitc:task:stop'"
+        @click="$emit('stop')"
+      >
+        停止任务
+      </el-button>
+      <el-button
         v-if="task?.status === TaskStatusEnum.COMPLETED"
         type="warning"
         v-hasPerm="'aitc:task:confirm'"
@@ -43,7 +51,7 @@
         审核任务结果
       </el-button>
       <el-button
-        v-if="task?.status === TaskStatusEnum.COMPLETED || task?.status === TaskStatusEnum.FAILED || task?.status === TaskStatusEnum.CONFIRMED"
+        v-if="task?.status === TaskStatusEnum.COMPLETED || task?.status === TaskStatusEnum.FAILED || task?.status === TaskStatusEnum.CONFIRMED || task?.status === TaskStatusEnum.STOPPED"
         type="danger"
         v-hasPerm="'aitc:task:create'"
         @click="$emit('rerun')"
@@ -67,5 +75,6 @@ defineProps<{
 defineEmits<{
   goReview: [];
   rerun: [];
+  stop: [];
 }>();
 </script>

@@ -22,7 +22,7 @@
 |---|---|
 | **描述** | 获取指定项目下的模块树结构。 |
 | **参数** | `project_id` (int, 必填) — 项目 ID |
-| **返回** | `{ suites: [{id, name, parent_id, tree_path}], total }` |
+| **返回** | `{ suites: [{id, name, parent_id, tree_path, description}], total }` |
 | **使用场景** | 用户问「这个项目有哪些模块」；用户想看模块层级关系；用户想了解模块组织结构 |
 | **触发词** | 有哪些模块、模块树、查看模块结构 |
 
@@ -32,7 +32,7 @@
 |---|---|
 | **描述** | 搜索/列出测试用例，支持按模块、关键字、是否核心用例、是否有步骤等条件过滤。`has_steps=false` 可找出缺少测试步骤的用例。 |
 | **参数** | `suite_id` (int, 可选) — 模块 ID，不传用当前页面；`keywords` (str, 可选)；`is_core` (bool, 可选)；`has_steps` (bool, 可选)；`page` (int, 默认 1)；`page_size` (int, 默认 20，最多 50) |
-| **返回** | `{ cases: [{id, name, summary, importance, is_core, has_steps, steps_count, suite_id, project_id}], total, page }` |
+| **返回** | `{ cases: [{id, name, summary, importance, is_core, has_steps, steps_count, suite_id, project_id}], total, page, page_size }` |
 | **使用场景** | 用户问「这个模块有哪些用例」「找一下登录相关的用例」；用户问「哪些用例是核心的」「哪些用例缺步骤」；用户模糊提到某个功能名，需要搜索定位；用户问「帮我看看这个模块的用例情况」 |
 | **触发词** | 有哪些用例、搜索用例、找一下XX、看看模块、核心用例、缺步骤的 |
 
@@ -50,10 +50,10 @@
 
 | 项目 | 内容 |
 |---|---|
-| **描述** | 获取模块下标记为样本的用例列表。样本用例代表了该模块的用例编写规范。 |
+| **描述** | 获取模块下标记为样本的用例列表（最多 5 条）。样本用例代表了该模块的用例编写规范。 |
 | **参数** | `suite_id` (int, 可选) — 模块 ID，不传用当前页面模块 |
 | **返回** | `{ samples: [{id, name, summary, steps_count, ...}], total }` |
-| **使用场景** | 用户问「这个模块的样本用例是什么」；用户问「用例应该怎么写」；设计新用例前参考样本格式 |
+| **使用场景** | 用户问「这个模块的样本用例是什么」；用户问「用例应该怎么写」；设计新用例/补全字段前参考样本格式 |
 | **触发词** | 样本用例、参考用例、用例范例、怎么写 |
 
 ---
@@ -68,20 +68,22 @@
 | **参数** | `title` (str, 必填) — 问题标题，如"审核用例前需要确认以下信息"；`questions` (list, 必填) — 问题列表，每项含：`id` (str)、`label` (str)、`type` (str, 默认 text，可选 select)、`placeholder` (str, 可选)、`options` ([{id, label}], 可选)、`required` (bool, 默认 true) |
 | **返回** | `{ msg_type: "clarify_card", content, metadata: {questions} }` |
 | **使用场景** | ① 意图模糊，需确认项目/模块（如「帮我审核用例」→ 哪项目？哪模块？）；② 任务前需确认范围（如「审核全部用例还是只审核选中的？」）；③ 需要用户在多个选项中做选择才能继续；④ 用户说的不够明确，需要补充参数 |
-| **规则** | 调用后必须等待用户回答，不能同时调用任务工具 |
+| **规则** | 一次性列出所有问题在一张表单中；有明确选项时优先用 select；调用后必须等待用户回答，不能同时调用任务工具 |
 
 ---
 
-## 三、任务类（3 个）— 返回确认卡片
+## 三、任务类（4 个）— 返回确认卡片
+
+> 任务类工具共用 `CreateTaskArgs` 参数基类：`suite_id`、`project_id`、`scope`（`'all'` 整个模块 / 不传为选中用例）、`case_ids`（仅 `create_case_complete_task` 使用）。
 
 ### 7. `create_core_select_task`
 
 | 项目 | 内容 |
 |---|---|
 | **描述** | AI 从指定模块用例中挑选核心/重要用例，返回确认卡片等用户确认后创建后台任务。 |
-| **参数** | `suite_id` (int, 可选) — 模块 ID，不传用当前页面；`project_id` (int, 可选) — 项目 ID，不传用当前页面 |
-| **返回** | `{ msg_type: "confirm_card", content, metadata: {case_ids, ...} }` |
-| **使用场景** | 用户说「帮我挑一下核心用例」；用户说「这个模块哪些用例最重要」；用户问「哪些用例的优先级高」；用例太多，需要筛选出关键的做重点维护 |
+| **参数** | `suite_id` (int, 可选) — 模块 ID；`project_id` (int, 可选) — 项目 ID，不传均用当前页面 |
+| **返回** | `{ msg_type: "confirm_card", content, metadata: {task_type, project_id, suite_id, total, ...} }` |
+| **使用场景** | 用户说「帮我挑一下核心用例」；用户说「这个模块哪些用例最重要」；用例太多，需要筛选出关键的做重点维护 |
 | **触发词** | 挑选核心用例、挑重要用例、哪些核心、核心用例、优先级高的 |
 
 ### 8. `create_case_review_task`
@@ -89,9 +91,9 @@
 | 项目 | 内容 |
 |---|---|
 | **描述** | 批量审核用例质量（字段完整性、步骤规范性等），返回确认卡片等用户确认。 |
-| **参数** | `suite_id` (int, 可选) / `project_id` (int, 可选) |
-| **返回** | `{ msg_type: "confirm_card", content, metadata: {case_ids, ...} }` |
-| **使用场景** | 用户说「帮我审核一下用例」「检查一下用例质量」；用户问「这些用例写得怎么样」「用例够不够规范」；用例评审前做一轮自动检查；新导入一批用例后检查质量 |
+| **参数** | `suite_id` (int, 可选)；`project_id` (int, 可选)；`scope` (str, 可选) — `'all'` 审核整个模块，`'selected'` 或留空审核选中用例 |
+| **返回** | `{ msg_type: "confirm_card", content, metadata: {task_type, project_id, suite_id, total, ...} }` |
+| **使用场景** | 用户说「帮我审核一下用例」「检查一下用例质量」；用户问「这些用例写得怎么样」；用例评审前做一轮自动检查；新导入一批用例后检查质量 |
 | **触发词** | 审核用例、检查质量、评审用例、用例怎么样、合不合格 |
 
 ### 9. `create_script_gen_task`
@@ -99,34 +101,34 @@
 | 项目 | 内容 |
 |---|---|
 | **描述** | 批量生成 pytest 自动化测试脚本，返回确认卡片等用户确认。 |
-| **参数** | `suite_id` (int, 可选) / `project_id` (int, 可选) |
-| **返回** | `{ msg_type: "confirm_card", content, metadata: {case_ids, ...} }` |
+| **参数** | `suite_id` (int, 可选)；`project_id` (int, 可选) |
+| **返回** | `{ msg_type: "confirm_card", content, metadata: {task_type, project_id, suite_id, total, ...} }` |
 | **使用场景** | 用户说「帮我生成自动化脚本」；用户说「给这些用例写 pytest」；用例审核通过后想一键生成脚本 |
 | **触发词** | 生成脚本、写自动化、生成自动化测试、pytest、自动化脚本 |
 
+### 10. `create_case_complete_task`
+
+| 项目 | 内容 |
+|---|---|
+| **描述** | 对指定模块下字段不完整的用例进行 AI 补全（含测试步骤），参考同模块样本用例的写法。用例必须有编号、名称、测试目的，缺任一项的用例将在执行阶段被跳过。返回确认卡片等用户确认后创建后台任务。 |
+| **参数** | `suite_id` (int, 可选) — 模块 ID；`project_id` (int, 可选) — 项目 ID；`scope` (str, 可选) — `'all'` 补全整个模块，不传则处理选中用例；`case_ids` (list[int], 可选) — 精确指定要补全的用例 ID 列表。可通过 `search_cases(has_steps=false)` 提前筛出缺步骤的用例再传入 |
+| **返回** | `{ msg_type: "confirm_card", content, metadata: {task_type, project_id, suite_id, total, ...} }` |
+| **使用场景** | 用户说「这些用例字段不全，帮我补一下」；用例导入后大量字段为空需要批量补全；用户说「帮我完善一下这个模块的用例」；先用 `search_cases` 筛出缺字段的用例，再传入 `case_ids` 精确补全 |
+| **触发词** | 完善用例、补全字段、补充信息、用例字段不全、帮忙补写、信息不完整 |
+
 ---
 
-## 四、即时处理类（3 个）— 返回草稿卡片
+## 四、即时处理类（2 个）— 返回草稿卡片
 
-### 10. `complete_case_steps`
+### 11. `complete_case_steps`
 
 | 项目 | 内容 |
 |---|---|
 | **描述** | AI 补写测试步骤和预期结果，返回草稿卡片可直接回填到用例编辑表单。 |
-| **参数** | `case_id` (int, 可选) — 用例 ID；`case_title` (str, 可选) — 用例标题（无 ID 时可用标题描述场景） |
+| **参数** | `case_id` (int, 可选) — 用例 ID，有 ID 时基于用例的 summary/purpose 补写；`case_title` (str, 可选) — 用例标题，无 ID 时基于标题推断编写 |
 | **返回** | `{ msg_type: "draft_card", content, draft_type: "case_steps", draft_data }` |
-| **使用场景** | 用户说「这个用例没有步骤，帮我补一下」；`search_cases` 发现大量缺步骤的用例，建议用户补写；用户给了一个标题「帮我写一下这个场景的测试步骤」；有 `case_id` → 基于用例的 summary/purpose 写；仅有 `case_title` → 基于标题推断 |
+| **使用场景** | 用户说「这个用例没有步骤，帮我补一下」；`search_cases` 发现大量缺步骤的用例，建议用户补写；用户给了一个标题「帮我写一下这个场景的测试步骤」 |
 | **触发词** | 补写步骤、补充测试步骤、写步骤、没步骤帮我补一下 |
-
-### 11. `complete_case_fields`
-
-| 项目 | 内容 |
-|---|---|
-| **描述** | AI 补全用例的前置条件、测试数据、拓扑等字段，返回草稿卡片。 |
-| **参数** | `case_id` (int, 必填) — 用例 ID；`field_hint` (str, 可选) — 要补全的字段提示（preconditions / topo / test_data / all，默认 all） |
-| **返回** | `{ msg_type: "draft_card", content, draft_type, draft_data }` |
-| **使用场景** | 用户说「这个用例信息不完整，帮我补全」；用户说「帮我把前置条件补充一下」；审核后发现字段缺失，用户想逐个修复 |
-| **触发词** | 补全字段、补充前置条件、信息不完整、完善字段、帮完善 |
 
 ### 12. `design_test_case`
 
@@ -147,13 +149,14 @@
 用户意图模糊                   → ask_question → 等回答 → 再调任务工具
 用户提到模块名/功能名            → 先 search_cases / get_case_detail 查数据 → 再建议操作
 发现大量缺步骤的用例            → 主动建议 complete_case_steps
-发现字段不完整                 → 主动建议 complete_case_fields 或 create_case_review_task
+发现字段不完整                 → 先 search_cases(has_steps=false) 筛出缺步骤用例 → 建议 create_case_complete_task
 上下文有 selected_case_ids      → 优先以选中用例为操作对象，而非整个模块
 ```
 
 ## 工具调用规则
 
-1. **批量操作先确认** — 核心挑选、用例审核、脚本生成会先返回确认卡片，用户确认后才真正执行
+1. **批量操作先确认** — 所有任务类工具会先返回确认卡片，用户确认后才真正执行
 2. **ask_question 后等待** — 不紧接着调用任务工具，等用户提交回答
 3. **上下文充足直接创建** — 页面已有 project_id / suite_id 且意图清晰时，可跳过 ask_question
 4. **主动查，不猜测** — 提到模块/用例先调查询工具获取实际数据
+5. **完善用例先筛选** — `create_case_complete_task` 支持 `case_ids` 参数，可先用 `search_cases` 精确筛出缺字段的用例再传入，避免处理不必要的用例

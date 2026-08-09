@@ -9,6 +9,7 @@ import json
 from datetime import datetime
 
 from loguru import logger
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.exceptions import BusinessException
@@ -20,7 +21,7 @@ from app.aitc.case.service import CaseService
 from app.aitc.spec.service import SpecService
 from app.aitc.script.service import ScriptService
 from app.aitc.constants import (
-    ConfirmStatus, ScriptSource, TaskStatus, TaskType,
+    ConfirmStatus, ItemStatus, ScriptSource, TaskStatus, TaskType,
 )
 from app.ai.agent.tasks import get_task_handler
 from app.aitc.models import AiTcCase, AiTcProject
@@ -271,6 +272,32 @@ class TaskEngine:
             is_core=getattr(ci, "is_core", None),
         )
 
+    # ═══════════════ 停止任务 ═══════════════
+
+    async def stop_task(self, task_id: int) -> None:
+        """停止一个正在排队或运行中的任务。"""
+        svc = self._svc
+
+        task = await svc.get_task(task_id)
+        if task is None:
+            raise BusinessException(code=ResultCode.DATA_NOT_FOUND, msg="任务不存在")
+
+        if task.status not in (TaskStatus.QUEUED, TaskStatus.RUNNING):
+            raise BusinessException(
+                code=ResultCode.PARAM_VALID_FAIL,
+                msg="只能停止排队中或运行中的任务",
+            )
+
+        # 写入 STOPPED 状态
+        await svc.stop_task(task_id)
+        await self.db.commit()
+
+        # 通知调度器取消对应的后台协程（仅 RUNNING 状态）
+        from app.ai.agent.tasks.scheduler import get_scheduler
+        get_scheduler().cancel_execution(task_id)
+
+        logger.info(f"Task {task_id} stopped, status={task.status}")
+
     # ═══════════════ 审核记录 & 单条审核 ═══════════════
 
     async def get_item_with_case(self, task_id: int, item_id: int) -> dict:
@@ -391,6 +418,20 @@ class TaskEngine:
         item.review_time = now
 
         await self.db.flush()
+
+        # 该任务所有明细均已审核 → 标记任务为已确认
+        pending_count = await self.db.scalar(
+            select(func.count()).select_from(AiTcTaskItem).where(
+                AiTcTaskItem.task_id == task_id,
+                AiTcTaskItem.confirm_status == ConfirmStatus.PENDING,
+                AiTcTaskItem.item_status == ItemStatus.SUCCESS,
+                AiTcTaskItem.is_deleted == 0,
+            )
+        )
+        if pending_count == 0:
+            await svc.mark_task_confirmed(task_id)
+            await self.db.flush()
+        
         logger.info(f"Item {item_id} reviewed by {reviewed_by}, fields: {len(form.fields)}")
 
     async def get_review_records(self, task_id: int) -> list[ReviewRecordVO]:

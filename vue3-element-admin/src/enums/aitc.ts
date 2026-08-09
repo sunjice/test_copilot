@@ -7,6 +7,7 @@ export enum TaskTypeEnum {
   CORE_SELECT = 'core_select',
   CASE_REVIEW = 'case_review',
   SCRIPT_GEN = 'script_gen',
+  CASE_COMPLETE = 'case_complete',
 }
 
 // ── 任务状态 ──
@@ -16,6 +17,7 @@ export enum TaskStatusEnum {
   COMPLETED = 2,
   FAILED = 3,
   CONFIRMED = 4,
+  STOPPED = 5,
 }
 
 // ── 子任务状态 ──

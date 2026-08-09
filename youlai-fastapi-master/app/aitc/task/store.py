@@ -215,6 +215,13 @@ class TaskStore:
             task.status = TaskStatus.CONFIRMED
             task.update_time = datetime.now()
 
+    async def stop_task(self, task_id: int) -> None:
+        """将任务状态置为已停止。仅 QUEUED/RUNNING 状态可停止。"""
+        task = await self.db.get(AiTcTask, task_id)
+        if task:
+            task.status = TaskStatus.STOPPED
+            task.update_time = datetime.now()
+
     async def reset_task_items(self, task_id: int) -> None:
         await self.db.execute(
             text(

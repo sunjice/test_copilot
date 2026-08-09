@@ -25,23 +25,28 @@ class ChatService:
 
     # ═══════════════ 会话 CRUD ═══════════════
 
-    async def create_session(self, req: SessionCreate) -> SessionVO:
+    async def create_session(self, req: SessionCreate, user_id: int | None = None) -> SessionVO:
         session = ChatSession(
             title=req.title,
             domain=req.domain,
             context_json=req.context_json or {},
             message_count=0,
             is_pinned=0,
+            user_id=user_id,
         )
         self.db.add(session)
         await self.db.flush()
         await self.db.refresh(session)
         return self._session_to_vo(session)
 
-    async def list_sessions(self, domain: str | None = None) -> list[SessionVO]:
+    async def list_sessions(
+        self, domain: str | None = None, user_id: int | None = None,
+    ) -> list[SessionVO]:
         conditions = [ChatSession.is_deleted == 0]
         if domain:
             conditions.append(ChatSession.domain == domain)
+        if user_id is not None:
+            conditions.append(ChatSession.user_id == user_id)
 
         result = await self.db.execute(
             select(ChatSession)
@@ -51,12 +56,12 @@ class ChatService:
         sessions = result.scalars().all()
         return [self._session_to_vo(s) for s in sessions]
 
-    async def get_session(self, session_id: int) -> SessionVO:
-        session = await self._get_session_or_404(session_id)
+    async def get_session(self, session_id: int, user_id: int | None = None) -> SessionVO:
+        session = await self._get_session_or_404(session_id, user_id)
         return self._session_to_vo(session)
 
-    async def update_session(self, session_id: int, req: SessionUpdate) -> SessionVO:
-        session = await self._get_session_or_404(session_id)
+    async def update_session(self, session_id: int, req: SessionUpdate, user_id: int | None = None) -> SessionVO:
+        session = await self._get_session_or_404(session_id, user_id)
         if req.title is not None:
             session.title = req.title
         if req.is_pinned is not None:
@@ -66,13 +71,13 @@ class ChatService:
         await self.db.refresh(session)
         return self._session_to_vo(session)
 
-    async def delete_session(self, session_id: int):
-        session = await self._get_session_or_404(session_id)
+    async def delete_session(self, session_id: int, user_id: int | None = None):
+        session = await self._get_session_or_404(session_id, user_id)
         session.is_deleted = 1
         await self.db.flush()
 
-    async def set_context(self, session_id: int, req: ContextSetReq):
-        session = await self._get_session_or_404(session_id)
+    async def set_context(self, session_id: int, req: ContextSetReq, user_id: int | None = None):
+        session = await self._get_session_or_404(session_id, user_id)
         if req.domain:
             session.domain = req.domain
         # 全量替换而非 merge，防止旧值（如已清空的 current_case_id）残留
@@ -116,7 +121,9 @@ class ChatService:
         await self.db.refresh(msg)
         return self._msg_to_vo(msg)
 
-    async def get_messages(self, session_id: int) -> list[MessageVO]:
+    async def get_messages(self, session_id: int, user_id: int | None = None) -> list[MessageVO]:
+        # 先校验会话所有权
+        await self._get_session_or_404(session_id, user_id)
         result = await self.db.execute(
             select(ChatMessage)
             .where(ChatMessage.session_id == session_id)
@@ -125,9 +132,9 @@ class ChatService:
         msgs = result.scalars().all()
         return [self._msg_to_vo(m) for m in msgs]
 
-    async def get_message_history(self, session_id: int, limit: int = 40) -> list[dict]:
+    async def get_message_history(self, session_id: int, limit: int = 40, user_id: int | None = None) -> list[dict]:
         """获取最近 N 轮对话历史（供 LLM 使用）。"""
-        msgs = await self.get_messages(session_id)
+        msgs = await self.get_messages(session_id, user_id=user_id)
         recent = msgs[-limit:] if len(msgs) > limit else msgs
         return [
             {"role": m.role, "content": m.content}
@@ -195,16 +202,22 @@ class ChatService:
         await self.db.refresh(draft)
         return self._draft_to_vo(draft)
 
-    async def get_draft(self, draft_id: int) -> DraftVO:
+    async def get_draft(self, draft_id: int, user_id: int | None = None) -> DraftVO:
         draft = await self.db.get(ChatDraft, draft_id)
         if draft is None:
             raise BusinessException(f"草稿不存在: {draft_id}")
+        # 校验所属会话所有权
+        if user_id is not None:
+            await self._get_session_or_404(draft.session_id, user_id)
         return self._draft_to_vo(draft)
 
-    async def confirm_draft(self, draft_id: int, req: DraftConfirmReq) -> DraftVO:
+    async def confirm_draft(self, draft_id: int, req: DraftConfirmReq, user_id: int | None = None) -> DraftVO:
         draft = await self.db.get(ChatDraft, draft_id)
         if draft is None:
             raise BusinessException(f"草稿不存在: {draft_id}")
+        # 校验所属会话所有权
+        if user_id is not None:
+            await self._get_session_or_404(draft.session_id, user_id)
 
         if req.action == "confirm":
             draft.status = "confirmed"
@@ -247,16 +260,19 @@ class ChatService:
 
     # ═══════════════ 私有方法 ═══════════════
 
-    async def _get_session_or_404(self, session_id: int) -> ChatSession:
+    async def _get_session_or_404(self, session_id: int, user_id: int | None = None) -> ChatSession:
+        conditions = [
+            ChatSession.id == session_id,
+            ChatSession.is_deleted == 0,
+        ]
+        if user_id is not None:
+            conditions.append(ChatSession.user_id == user_id)
         result = await self.db.execute(
-            select(ChatSession).where(
-                ChatSession.id == session_id,
-                ChatSession.is_deleted == 0,
-            )
+            select(ChatSession).where(*conditions)
         )
         session = result.scalar_one_or_none()
         if session is None:
-            raise BusinessException(f"会话不存在: {session_id}")
+            raise BusinessException(f"会话不存在或无权访问: {session_id}")
         return session
 
     async def _auto_title(self, session_id: int, content: str):

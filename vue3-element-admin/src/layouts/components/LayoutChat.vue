@@ -47,10 +47,10 @@
         <el-button v-if="!showHistory" text circle @click="newSession" title="新对话">
           <el-icon><Plus /></el-icon>
         </el-button>
-        <el-button text circle @click="toggleViewMode" :title="viewMode === 'float' ? '切换为抽屉模式' : '切换为浮窗模式'">
+        <el-button text circle :title="viewMode === 'float' ? '切换为抽屉模式' : '切换为浮窗模式'" @click="toggleViewMode">
           <el-icon><component :is="viewMode === 'float' ? DArrowLeft : Grid" /></el-icon>
         </el-button>
-        <el-button text circle @click="toggle" title="收起">
+        <el-button text circle title="收起" @click="toggle" >
           <el-icon><DArrowRight /></el-icon>
         </el-button>
       </div>
@@ -102,7 +102,8 @@
             <el-icon :size="26" color="var(--el-color-primary)"><ChatDotRound /></el-icon>
           </div>
           <h2 class="welcome-title">{{ welcomeTitle }}</h2>
-          <p class="welcome-subtitle">我可以帮你挑选核心用例、审核质量、生成脚本、补全字段等</p>
+          <!-- <p class="welcome-subtitle">我可以帮你挑选核心用例、审核质量、完善用例等</p> -->
+          <p class="welcome-subtitle"> </p>
 
           <div class="quick-actions">
             <div
@@ -240,7 +241,7 @@ import { useRoute } from "vue-router"
 import { ElMessage, ElMessageBox } from "element-plus"
 import {
   ChatDotRound, Plus, DArrowRight, DArrowLeft, Promotion, ArrowLeft, ArrowDown, Clock, Delete, Search, Edit,
-  FolderChecked, DocumentChecked, EditPen, CircleCheck,
+  FolderChecked, DocumentChecked, EditPen, CircleCheck, View,
   Grid, Opportunity, Collection, Location, Close, VideoPause,
 } from "@element-plus/icons-vue"
 import ChatMessage from "./chat/ChatMessage.vue"
@@ -525,12 +526,13 @@ async function onRetry() {
 const showContextBar = ref(true)
 
 const welcomeTitle = computed(() => {
-  const hour = new Date().getHours()
-  let greet: string
-  if (hour < 12) greet = "早上好"
-  else if (hour < 18) greet = "下午好"
-  else greet = "晚上好"
-  return `${greet}，有什么我能帮你的吗？`
+  // const hour = new Date().getHours()
+  // let greet: string
+  // if (hour < 12) greet = "早上好"
+  // else if (hour < 18) greet = "下午好"
+  // else greet = "晚上好"
+  // return `${greet}，有什么我能帮你的吗？`
+  return "有什么我能帮你的吗？"
 })
 
 interface ContextItem {
@@ -589,20 +591,20 @@ const quickActions = shallowRef<QuickAction[]>([
     title: "挑选核心用例",
     desc: "从当前模块智能挑选最重要的用例",
     prompt: "帮我挑选核心用例",
-    icon: CircleCheck,
+    icon: Search,
     bg: "linear-gradient(135deg, #e0f2fe 0%, #bae6fd 100%)",
   },
   {
     title: "审核用例质量",
     desc: "检查字段完整性和步骤规范性",
     prompt: "审核用例质量",
-    icon: CircleCheck,
+    icon: View,
     bg: "linear-gradient(135deg, #dcfce7 0%, #bbf7d0 100%)",
   },
   {
-    title: "补写测试步骤",
-    desc: "AI 自动补全用例的测试步骤",
-    prompt: "补写测试步骤",
+    title: "完善测试用例",
+    desc: "自动补全用例的缺失字段和测试步骤",
+    prompt: "完善测试用例",
     icon: EditPen,
     bg: "linear-gradient(135deg, #ffedd5 0%, #fed7aa 100%)",
   },
@@ -645,7 +647,7 @@ async function onSubmitClarify(text: string, answers: Record<string, string>) {
 // ── 滚动控制 ──
 const userScrolledUp = ref(false)
 const showScrollBottom = ref(false)
-const scrollThrottle = ref(false)
+// const scrollThrottle = ref(false)
 
 function onMsgScroll() {
   const el = msgListRef.value

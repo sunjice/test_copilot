@@ -388,7 +388,7 @@ const TOOL_LABELS = new Map<string, string>([
   ["create_case_review_task", "创建审核任务"],
   ["create_script_gen_task", "创建脚本生成任务"],
   ["complete_case_steps", "补写测试步骤"],
-  ["complete_case_fields", "补全用例字段"],
+  ["create_case_complete_task", "完善用例"],
   ["design_test_case", "设计测试用例"],
 ])
 

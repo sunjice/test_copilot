@@ -1,6 +1,6 @@
 <template>
   <div class="aitc-task-detail-page">
-    <TaskProgress :task-id="taskId" :task="task" @go-review="goReview" @rerun="rerunTask">
+    <TaskProgress :task-id="taskId" :task="task" @go-review="goReview" @rerun="rerunTask" @stop="stopTask">
       <template #header-left>
         <el-button @click="goBack" icon="ArrowLeft" size="small">返回</el-button>
       </template>
@@ -87,7 +87,7 @@
         <el-table-column label="操作" width="120" fixed="right" align="center">
           <template #default="{ row }">
             <el-button
-              v-if="row.item_status === ItemStatusEnum.SUCCESS && (row.output?.rewritten || row.output?.fields || row.output?.script)"
+              v-if="row.item_status === ItemStatusEnum.SUCCESS && row.confirm_status === ConfirmStatusEnum.PENDING && (row.output?.rewritten || row.output?.fields || row.output?.script)"
               text type="primary" size="small"
               @click="goReviewItem(row)"
             >
@@ -126,12 +126,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from "vue";
+import { ref, computed, onMounted, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { ElMessage, ElMessageBox } from "element-plus";
 import TaskAPI from "@/api/aitc/task";
 import type { TaskVO, TaskItemVO, ReviewRecordVO } from "@/api/aitc/task";
-import { ItemStatusEnum, ConfirmStatusEnum } from "@/enums/aitc";
+import { ItemStatusEnum, ConfirmStatusEnum, TaskStatusEnum } from "@/enums/aitc";
 import {
   confirmLabel, confirmTag,
   itemStatusLabel, itemStatusTag,
@@ -154,7 +154,7 @@ const reviewRecords = ref<ReviewRecordVO[]>([]);
 const loading = ref(false);
 const itemKeyword = ref("");
 // 自动刷新
-const { autoRefresh } = useTaskPolling(loadData);
+const { autoRefresh } = useTaskPolling(loadData, 1000);
 
 // 格式化用例编号：project_prefix + external_id + __ + case_name
 function formatCaseNumber(row: TaskItemVO): string {
@@ -269,8 +269,34 @@ async function rerunTask() {
   }
 }
 
+async function stopTask() {
+  try {
+    await ElMessageBox.confirm(
+      task.value?.status === TaskStatusEnum.RUNNING
+        ? "确认停止任务？正在执行的用例将中断。"
+        : "确认停止任务？",
+      "停止确认",
+      { type: "warning", confirmButtonText: "确认停止" }
+    );
+  } catch {
+    return;
+  }
+  try {
+    await TaskAPI.stop(taskId);
+    ElMessage.success("任务已停止");
+    loadData();
+  } catch (e: any) {
+    ElMessage.error(e?.message || "停止失败");
+  }
+}
+
 onMounted(() => {
   loadData();
+});
+
+// 从审核页返回时静默刷新（keep-alive 的 key 复用不触发 onMounted）
+watch(() => route.fullPath, () => {
+  loadData(true);
 });
 </script>
 

@@ -41,7 +41,7 @@ class TaskScheduler:
     def __init__(self):
         self._running = False
         self._task: asyncio.Task | None = None
-        self._active_executions: set[asyncio.Task] = set()
+        self._active_executions: dict[int, asyncio.Task] = {}  # task_id → asyncio.Task
 
     # ── 启动 / 停止 ──
 
@@ -64,14 +64,22 @@ class TaskScheduler:
             except asyncio.CancelledError:
                 pass
 
-        if self._active_executions:
-            logger.info(f"Waiting for {len(self._active_executions)} active executions to finish...")
+        tasks = list(self._active_executions.values())
+        if tasks:
+            logger.info(f"Waiting for {len(tasks)} active executions to finish...")
             await asyncio.wait_for(
-                asyncio.gather(*self._active_executions, return_exceptions=True),
+                asyncio.gather(*tasks, return_exceptions=True),
                 timeout=120,  # 最长等 2 分钟
             )
 
         logger.info("TaskScheduler stopped")
+
+    def cancel_execution(self, task_id: int):
+        """取消指定任务的正在执行的后台协程。"""
+        bg_task = self._active_executions.pop(task_id, None)
+        if bg_task and not bg_task.done():
+            bg_task.cancel()
+            logger.info(f"Scheduler cancelled execution of task {task_id}")
 
     # ── 主循环 ──
 
@@ -198,8 +206,8 @@ class TaskScheduler:
 
                     # 后台拉起执行
                     bg = asyncio.create_task(execute_task_bg(task.id, task.task_type))
-                    self._active_executions.add(bg)
-                    bg.add_done_callback(self._active_executions.discard)
+                    self._active_executions[task.id] = bg
+                    bg.add_done_callback(lambda t, tid=task.id: self._active_executions.pop(tid, None))
 
                     launched += 1
                     logger.info(

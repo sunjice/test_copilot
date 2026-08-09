@@ -43,12 +43,19 @@
         </el-table-column>
         <el-table-column prop="create_by" label="创建人" width="90" />
         <el-table-column prop="create_time" label="创建时间" width="140" />
-        <el-table-column label="操作" width="180" fixed="right">
+        <el-table-column label="操作" width="210" fixed="right">
           <template #default="{ row }">
             <div class="ops-btns">
               <el-button text type="primary" size="small" @click="goDetail(row)">详情</el-button>
               <el-button
-                v-if="row.status === TaskStatusEnum.COMPLETED || row.status === TaskStatusEnum.FAILED || row.status === TaskStatusEnum.CONFIRMED"
+                v-if="row.status === TaskStatusEnum.QUEUED || row.status === TaskStatusEnum.RUNNING"
+                text type="danger" size="small"
+                v-hasPerm="'aitc:task:stop'" @click="stopTask(row)"
+              >
+                停止
+              </el-button>
+              <el-button
+                v-if="row.status === TaskStatusEnum.COMPLETED || row.status === TaskStatusEnum.FAILED || row.status === TaskStatusEnum.CONFIRMED || row.status === TaskStatusEnum.STOPPED"
                 text type="danger" size="small"
                 v-hasPerm="'aitc:task:create'" @click="rerunTask(row)"
               >
@@ -163,6 +170,26 @@ async function rerunTask(row: TaskVO) {
     loadTasks();
   } catch (e: any) {
     ElMessage.error(e?.message || "重跑失败");
+  }
+}
+
+async function stopTask(row: TaskVO) {
+  try {
+    await ElMessageBox.confirm(
+      `确认停止任务 #${row.id}？${row.status === TaskStatusEnum.RUNNING ? '正在执行的用例将中断。' : ''}`,
+      "停止确认",
+      { type: "warning", confirmButtonText: "确认停止" }
+    );
+  } catch {
+    return;
+  }
+  try {
+    await TaskAPI.stop(String(row.id));
+    ElMessage.success("任务已停止");
+    row.status = TaskStatusEnum.STOPPED;
+    loadTasks();
+  } catch (e: any) {
+    ElMessage.error(e?.message || "停止失败");
   }
 }
 

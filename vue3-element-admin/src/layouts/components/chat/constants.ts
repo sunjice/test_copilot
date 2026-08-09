@@ -10,8 +10,8 @@ export const TOOL_LABELS: Record<string, string> = {
   create_core_select_task: "正在准备核心用例挑选任务...",
   create_case_review_task: "正在准备用例审核任务...",
   create_script_gen_task: "正在准备脚本生成任务...",
+  create_case_complete_task: "正在准备完善用例任务...",
   complete_case_steps: "正在补写测试步骤...",
-  complete_case_fields: "正在补全用例字段...",
   design_test_case: "正在设计测试用例...",
 }
 

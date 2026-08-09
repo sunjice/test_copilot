@@ -11,6 +11,9 @@ export function resolveReviewPath(taskType: string, taskId: string, itemId: stri
   if (taskType === "case_review") {
     return `/aitc/tasks/${taskId}/case-review/${itemId}`
   }
+  if (taskType === "case_complete") {
+    return `/aitc/tasks/${taskId}/case-complete/${itemId}`
+  }
   if (taskType === "script_gen") {
     return `/aitc/tasks/${taskId}/script-review/${itemId}`
   }

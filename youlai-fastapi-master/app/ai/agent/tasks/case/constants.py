@@ -16,3 +16,10 @@ class CaseReviewConfig:
 class ScriptGenConfig:
     """脚本生成。"""
     BATCH_SIZE = 1   # 每批提交给 AI 生成脚本的用例数
+
+
+class CaseCompleteConfig:
+    """补全用例字段。"""
+    BATCH_SIZE = 1   # 每批提交给 AI 补全字段的用例数（逐条执行）
+    COMMIT_EVERY = 1  # 每处理多少条向 DB 提交一次进度
+    SAMPLE_LIMIT = 3  # 从套件下选取样本用例的最大条数
