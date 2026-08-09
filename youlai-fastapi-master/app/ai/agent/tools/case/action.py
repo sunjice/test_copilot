@@ -28,12 +28,6 @@ class CreateTaskArgs(BaseModel):
     case_ids: list[int] | None = Field(None, description="指定要处理的用例 ID 列表（仅字段补全任务使用）。如果提供此参数，scope 将被忽略。可通过 search_cases 提前筛选出需要补全的用例再传入")
 
 
-class CompleteStepsArgs(BaseModel):
-    """补写测试步骤的参数。"""
-    case_id: int | None = Field(None, description="用例 ID")
-    case_title: str | None = Field(None, description="用例标题（当无 ID 时可用标题描述）")
-
-
 class DesignCaseArgs(BaseModel):
     """设计测试用例的参数。"""
     requirement: str = Field(..., description="需求描述或功能点说明")
@@ -58,7 +52,7 @@ async def _run_skill(skill_name: str, params: dict, ctx: ToolContext) -> tuple[s
     """执行一个 Skill，返回 (content_text, artifact_dict) 元组。
 
     content_text  → 给模型看的摘要文本
-    artifact_dict → 给 UI 渲染的卡片数据（draft_card / confirm_card），无卡片时为 None
+    artifact_dict → 给 UI 渲染的卡片数据（confirm_card），无卡片时为 None
     """
     skill = skill_registry.get(skill_name)
     if skill is None:
@@ -72,18 +66,16 @@ def _result_to_tuple(result: SkillResult, skill_name: str) -> tuple[str, dict | 
     """将 SkillResult 转为 (content, artifact) 元组。
 
     - content: 给模型的简短文本描述
-    - artifact: 卡片数据字典（draft_card/confirm_card），无卡片时为 None
+    - artifact: 卡片数据字典（confirm_card），无卡片时为 None
     """
     if not result.success:
         return (result.error or result.content or f"{skill_name} 执行失败", None)
 
     # 有卡片类型 → 提取为 artifact
-    if result.msg_type in ("draft_card", "confirm_card"):
+    if result.msg_type == "confirm_card":
         artifact = {
             "msg_type": result.msg_type,
             "content": result.content or "",
-            "draft_type": result.draft_type,
-            "draft_data": result.draft_data,
             "metadata": result.metadata,
         }
         content = result.content or f"已生成 {skill_name} 结果，请确认。"
@@ -175,7 +167,7 @@ def make_create_case_complete_task_tool(ctx: ToolContext) -> StructuredTool:
             "scope": scope,
             "case_ids": case_ids,
         }
-        return await _run_skill("field_complete", params, ctx)
+        return await _run_skill("case_complete", params, ctx)
 
     return StructuredTool(
         name="create_case_complete_task",
@@ -196,25 +188,6 @@ def make_create_case_complete_task_tool(ctx: ToolContext) -> StructuredTool:
     )
 
 
-def make_complete_steps_tool(ctx: ToolContext) -> StructuredTool:
-    """补写测试步骤。"""
-
-    async def run(case_id: int | None = None, case_title: str | None = None, **kwargs) -> tuple[str, dict | None]:
-        params = {"case_id": case_id, "case_title": case_title}
-        return await _run_skill("steps_complete", params, ctx)
-
-    return StructuredTool(
-        name="complete_case_steps",
-        description=(
-            "根据用例的标题和测试目的，AI 补写详细的测试步骤和预期结果。返回草稿卡片。"
-            "当用户说'补写步骤'、'补充测试步骤'、'写步骤'、'这个用例没步骤帮我补一下'时调用。"
-        ),
-        coroutine=run,
-        args_schema=CompleteStepsArgs,
-        response_format="content_and_artifact",
-    )
-
-
 def make_design_case_tool(ctx: ToolContext) -> StructuredTool:
     """设计测试用例。"""
 
@@ -228,7 +201,7 @@ def make_design_case_tool(ctx: ToolContext) -> StructuredTool:
     return StructuredTool(
         name="design_test_case",
         description=(
-            "根据需求描述，从零设计一条新的测试用例（包含标题、前置条件、测试步骤、预期结果）。返回草稿卡片。"
+            "根据需求描述，从零设计一条新的测试用例（包含标题、前置条件、测试步骤、预期结果）。返回确认卡片供用户审核。"
             "当用户说'设计一条用例'、'帮我写一条测试用例'、'根据这个需求设计用例'时调用。"
         ),
         coroutine=run,

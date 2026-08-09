@@ -1,4 +1,4 @@
-"""补全用例字段 Skill — 对指定模块下字段不完整的用例进行 AI 补全。
+"""用例补全 Skill — 根据用例的 name 和 purpose 对其它字段进行 AI 补全。
 
 ASYNC 模式：返回确认卡片，用户确认后创建后台批量任务。
 """
@@ -10,12 +10,12 @@ from app.ai.agent.skills.case.tools import (
 from app.aitc.constants import TaskType
 
 
-class FieldCompleteSkill(BaseSkill):
+class CaseCompleteSkill(BaseSkill):
     name = "case_complete"
-    description = "参考同模块样本用例，对指定模块下字段不完整的用例进行 AI 补全（含测试步骤），或对用户指定的用例进行补全。当用户说'补全字段'、'完善用例'、'补充字段'时触发。"
+    description = "根据用例的name和purpose，对用例其它字段进行 AI 补全（测试思想、前置条件、测试数据、拓扑、测试步骤），支持单条或多条。当用户说'补全字段'、'完善用例'、'补写步骤'、'补充步骤'、'写测试步骤'时触发。"
     domain = "case"
     mode = SkillMode.ASYNC
-    keywords = ["补全", "补充", "完善", "填充", "补写", "缺少", "完整", "缺字段", "信息不全"]
+    keywords = ["补全", "补充", "完善", "填充", "补写", "缺少", "完整", "缺字段", "信息不全", "步骤", "补写步骤", "补充步骤", "测试步骤", "预期结果", "写步骤"]
     required_page = "case"
 
     def parameters_schema(self) -> dict:
@@ -118,5 +118,5 @@ class FieldCompleteSkill(BaseSkill):
         )
 
 
-field_complete_skill = FieldCompleteSkill()
-skill_registry.register(field_complete_skill)
+case_complete_skill = CaseCompleteSkill()
+skill_registry.register(case_complete_skill)

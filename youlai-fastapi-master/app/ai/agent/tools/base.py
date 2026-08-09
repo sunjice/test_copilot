@@ -3,6 +3,7 @@
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
+from langchain_core.tools import BaseTool
 from sqlalchemy.ext.asyncio import AsyncSession
 
 
@@ -26,3 +27,31 @@ class ToolContext:
 
 # 工具工厂类型
 ToolFactory = Callable[["ToolContext"], Any]
+
+# 工具构建器类型
+ToolBuilder = Callable[["ToolContext"], list[BaseTool]]
+
+
+class ToolRegistry:
+    """域级工具注册表 — 按 domain 管理工具构建器。"""
+
+    def __init__(self):
+        self._builders: dict[str, ToolBuilder] = {}
+
+    def register(self, domain: str, builder: ToolBuilder):
+        if domain in self._builders:
+            raise ValueError(f"Tool builder for domain '{domain}' 已注册")
+        self._builders[domain] = builder
+
+    def get_builder(self, domain: str) -> ToolBuilder | None:
+        return self._builders.get(domain)
+
+    def build_tools(self, domain: str, ctx: ToolContext) -> list[BaseTool]:
+        builder = self.get_builder(domain)
+        if builder is None:
+            return []
+        return builder(ctx)
+
+
+# 全局单例
+tool_registry = ToolRegistry()

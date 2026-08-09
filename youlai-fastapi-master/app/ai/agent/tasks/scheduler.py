@@ -80,6 +80,13 @@ class TaskScheduler:
         if bg_task and not bg_task.done():
             bg_task.cancel()
             logger.info(f"Scheduler cancelled execution of task {task_id}")
+        # 也尝试通知 worker 取消（若已被消费并在 worker 中运行）
+        try:
+            from app.ai.agent.tasks.worker import get_worker
+
+            get_worker().cancel_execution(task_id)
+        except Exception:
+            pass
 
     # ── 主循环 ──
 
@@ -204,14 +211,13 @@ class TaskScheduler:
                     if task.create_by:
                         running_users.add(task.create_by)
 
-                    # 后台拉起执行
-                    bg = asyncio.create_task(execute_task_bg(task.id, task.task_type))
-                    self._active_executions[task.id] = bg
-                    bg.add_done_callback(lambda t, tid=task.id: self._active_executions.pop(tid, None))
+                    # 入队：由独立 Worker 消费并执行（保留 RUNNING 状态）
+                    from app.ai.agent.tasks.queue import enqueue_task
 
+                    await enqueue_task(task.id, task.task_type)
                     launched += 1
                     logger.info(
-                        "Scheduler launched task id=%d type=%s [%d/%d slots]",
+                        "Scheduler enqueued task id=%d type=%s [%d/%d slots]",
                         task.id, task.task_type, launched, available,
                     )
 

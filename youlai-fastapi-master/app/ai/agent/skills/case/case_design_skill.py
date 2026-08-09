@@ -37,13 +37,8 @@ class CaseDesignSkill(BaseSkill):
 
         return SkillResult(
             success=True,
-            msg_type="draft_card",
-            content=f"正在根据需求「{requirement}」设计测试用例...",
-            draft_type="case_design",
-            draft_data={
-                "requirement": requirement,
-                "project_id": project_id,
-            },
+            msg_type="confirm_card",
+            content=f"根据需求「{requirement}」设计测试用例，等待确认后继续执行。",
             metadata={"requirement": requirement, "project_id": project_id},
         )
 

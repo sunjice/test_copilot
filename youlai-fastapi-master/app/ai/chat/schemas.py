@@ -53,32 +53,8 @@ class MessageVO(BaseModel):
     msg_type: str = "text"
     content: str = ""
     metadata_json: dict | None = None
-    draft_id: int | None = None
     create_time: str | None = None
     model_config = {"from_attributes": True}
-
-
-# ═══════════════ 草稿 ═══════════════
-
-class DraftVO(BaseModel):
-    """草稿视图对象。"""
-    id: BigId | None = None
-    session_id: BigId | None = None
-    message_id: BigId | None = None
-    draft_type: str = ""
-    title: str = ""
-    content_json: dict | None = None
-    status: str = "pending"
-    confirmed_by: str | None = None
-    confirmed_at: str | None = None
-    create_time: str | None = None
-    model_config = {"from_attributes": True}
-
-
-class DraftConfirmReq(BaseModel):
-    """确认草稿请求。"""
-    action: str = Field(..., description="confirm / discard")
-    edited_content: dict | None = Field(default=None, description="编辑后的内容（编辑采纳时）")
 
 
 # ═══════════════ 上下文 ═══════════════

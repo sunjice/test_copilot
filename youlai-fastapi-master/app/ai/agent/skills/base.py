@@ -7,7 +7,7 @@ from typing import Any
 
 
 class SkillMode(str, Enum):
-    SYNC = "SYNC"    # 对话内同步执行，产出 Draft
+    SYNC = "SYNC"    # 对话内同步执行，产出确认卡片
     ASYNC = "ASYNC"  # 批量异步，委托 TaskEngine
 
 
@@ -15,10 +15,8 @@ class SkillMode(str, Enum):
 class SkillResult:
     """Skill 执行结果。"""
     success: bool = True
-    msg_type: str = "text"         # text/action_card/task_card/draft_card/clarify_card
+    msg_type: str = "text"         # text/action_card/task_card/confirm_card/clarify_card
     content: str = ""               # Markdown 正文
-    draft_type: str | None = None   # 草稿类型
-    draft_data: dict | None = None  # 草稿数据
     metadata: dict = field(default_factory=dict)
     error: str | None = None
 

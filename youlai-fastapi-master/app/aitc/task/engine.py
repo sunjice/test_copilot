@@ -295,6 +295,13 @@ class TaskEngine:
         # 通知调度器取消对应的后台协程（仅 RUNNING 状态）
         from app.ai.agent.tasks.scheduler import get_scheduler
         get_scheduler().cancel_execution(task_id)
+        # 也尝试通知独立的 worker 取消（适配队列/worker 模型）
+        try:
+            from app.ai.agent.tasks.worker import get_worker
+
+            get_worker().cancel_execution(task_id)
+        except Exception:
+            pass
 
         logger.info(f"Task {task_id} stopped, status={task.status}")
 

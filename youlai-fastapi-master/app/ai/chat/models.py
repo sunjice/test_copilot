@@ -44,49 +44,17 @@ class ChatMessage(Base, BaseIdMixin, TimestampMixin):
     )
     msg_type: Mapped[str] = mapped_column(
         String(30), default="text", server_default="'text'",
-        comment="消息类型 text/action_card/task_card/draft_card/clarify_card/help_card"
+        comment="消息类型 text/action_card/task_card/confirm_card/clarify_card/help_card"
     )
     content: Mapped[str] = mapped_column(Text, nullable=False, comment="消息正文（Markdown）")
     metadata_json: Mapped[dict | None] = mapped_column(
         JSONB, comment="附加数据 {skill_name, tool_calls, tokens, execution_time_ms, ...}"
-    )
-    draft_id: Mapped[int | None] = mapped_column(
-        BigInteger, comment="关联的 Draft ID（如有产出）"
     )
 
     session: Mapped["ChatSession"] = relationship(back_populates="messages", lazy="selectin")
 
     __table_args__ = (
         Index("idx_chat_msg_session", "session_id", "id"),
-    )
-
-
-class ChatDraft(Base, BaseIdMixin, TimestampMixin):
-    """AI 产出草稿。"""
-    __tablename__ = "chat_drafts"
-
-    session_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("chat_sessions.id"), nullable=False, comment="所属会话ID"
-    )
-    message_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("chat_messages.id"), nullable=False, comment="关联消息ID"
-    )
-    draft_type: Mapped[str] = mapped_column(
-        String(30), nullable=False,
-        comment="草稿类型 core_select/case_review/script_gen/field_complete/steps_complete/case_design"
-    )
-    title: Mapped[str] = mapped_column(String(200), default="", server_default="''", comment="草稿标题")
-    content_json: Mapped[dict] = mapped_column(JSONB, nullable=False, comment="草稿内容")
-    status: Mapped[str] = mapped_column(
-        String(20), default="pending", server_default="'pending'",
-        comment="状态 pending/confirmed/applied/discarded"
-    )
-    confirmed_by: Mapped[str | None] = mapped_column(String(64), comment="确认人")
-    confirmed_at: Mapped[str | None] = mapped_column(String(32), comment="确认时间")
-
-    __table_args__ = (
-        Index("idx_chat_draft_session", "session_id"),
-        Index("idx_chat_draft_msg", "message_id"),
     )
 
 
