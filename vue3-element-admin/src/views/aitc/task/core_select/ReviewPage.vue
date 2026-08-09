@@ -104,6 +104,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, reactive } from "vue"
 import { useRoute, useRouter } from "vue-router"
+import { useTagsViewStore } from "@/stores/tags-view"
 import { ElMessage, ElMessageBox } from "element-plus"
 import TaskAPI from "@/api/aitc/task"
 import type { TaskVO, TaskItemVO, TaskConfirmItem } from "@/api/aitc/task"
@@ -112,6 +113,7 @@ import { importanceLabel, importanceType, statusLabel as taskStatusLabel, status
 
 const route = useRoute()
 const router = useRouter()
+const tagsViewStore = useTagsViewStore()
 const taskId = String(route.params.taskId || "")
 
 const loading = ref(false)
@@ -257,7 +259,20 @@ const nonCoreConfirmCount = computed(() =>
 )
 
 function goBack() {
-  router.push(`/aitc/tasks/${taskId}`)
+  // 先 replace 回任务详情（不新增历史/标签），再删除当前审核页标签
+  const currentTag = {
+    name: route.name as string,
+    title: route.meta.title as string,
+    path: route.path,
+    fullPath: route.fullPath,
+    icon: route.meta?.icon as string | undefined,
+    affix: route.meta?.affix,
+    keepAlive: route.meta?.keepAlive,
+    query: { ...route.query },
+  }
+  router.replace(`/aitc/tasks/${taskId}`).then(() => {
+    tagsViewStore.delView(currentTag)
+  })
 }
 
 onMounted(() => loadData())

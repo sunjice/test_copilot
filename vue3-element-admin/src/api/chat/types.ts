@@ -96,6 +96,35 @@ export interface UpdateCardStatusReq {
   metadata: Record<string, any>
 }
 
+// ═══════════════ Segment 区块模型（一轮回复 = 有序区块数组） ═══════════════
+
+/** 工具区块 */
+export interface ToolSegment {
+  type: "tool"
+  name: string
+  status: "running" | "done" | "failed"
+  argsSummary?: string
+  startedAt: number
+  durationMs?: number
+  error?: string
+}
+
+/** 文本区块 */
+export interface TextSegment {
+  type: "text"
+  content: string
+}
+
+/** 思考区块（可折叠） */
+export interface ThinkingSegment {
+  type: "thinking"
+  content: string
+  startedAt?: number   // 思考开始时间戳（performance.now()），用于显示耗时
+  durationMs?: number   // 思考耗时（历史消息从 segments 中恢复）
+}
+
+export type Segment = ToolSegment | TextSegment | ThinkingSegment
+
 // ═══════════════ SSE 事件 ═══════════════
 
 export interface SseEvent {

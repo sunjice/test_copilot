@@ -61,6 +61,7 @@ def _case_to_dict(case: AiTcCase) -> dict[str, Any]:
     return {
         "id": case.id,
         "name": case.name,
+        "purpose": case.purpose or "",
         "summary": (case.summary or "")[:200],
         "preconditions": (case.preconditions or "")[:100],
         "importance": case.importance,

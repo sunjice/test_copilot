@@ -14,6 +14,7 @@ from typing import Any, AsyncGenerator
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langchain_core.tools import BaseTool
 from langchain_openai import ChatOpenAI
+from loguru import logger
 
 from app.ai.agent.skills.base import BaseSkill, SkillResult
 from app.ai.agent.tools.base import ToolContext, tool_registry
@@ -76,7 +77,9 @@ class PromptManager:
     def build_agent_prompt(self, context: SessionContext, tools: list[BaseTool]) -> str:
         prompt = _get_agent_prompt_template()
         prompt += self._build_page_context(context)
-        prompt += self._build_tools_prompt(tools)
+        # 工具定义已通过 create_react_agent 的 tools 参数传入 API，
+        # 不再需要拼到 system prompt 文本中，避免重复浪费 token。
+        # prompt += self._build_tools_prompt(tools)
         return prompt
 
     async def build_freeform_messages(
@@ -200,10 +203,14 @@ class FreeformStrategy(ChatStrategy):
             callback = LangChainTokenCallback(meter)
             full_text = ""
 
+            logger.debug("[FreeformStrategy] LLM astream 开始")
+            chunk_count = 0
             async for chunk in llm.astream(messages, config={"callbacks": [callback]}):
                 if chunk.content:
                     full_text += chunk.content
+                    chunk_count += 1
                     yield {"event": "chunk", "data": {"content": chunk.content}}
+            logger.debug(f"[FreeformStrategy] LLM astream 完成 chunks={chunk_count}")
 
             duration_ms = int((time.time() - t_start) * 1000)
             await LlmLogWriter.write(
@@ -416,8 +423,6 @@ class AgentStrategy(ChatStrategy):
             db=db,
             session_id=context.session_id,
             domain=context.domain,
-            project_id=context.project_id,
-            suite_id=context.suite_id,
             page_type=context.context_json.get("current_page", ""),
             context_json=context.context_json,
             user_id=context.context_json.get("user_id") or 0,
@@ -466,9 +471,17 @@ class ChatOrchestrator:
         context: SessionContext,
         history: list[dict] | None = None,
     ) -> AsyncGenerator[str, None]:
+        logger.debug("[ChatOrchestrator.process_message] START")
+        t0 = time.time()
         strategy = self._trigger_router.route(message, context)
-        async for event in strategy.handle(message, context, history):
-            yield self._sse_event(event["event"], event["data"])
+        event_count = 0
+        try:
+            async for event in strategy.handle(message, context, history):
+                yield self._sse_event(event["event"], event["data"])
+                event_count += 1
+        finally:
+            dt = int((time.time() - t0) * 1000)
+            logger.debug(f"[ChatOrchestrator.process_message] END 耗时={dt}ms events={event_count}")
 
     @staticmethod
     def _sse_event(event: str, data: dict) -> str:

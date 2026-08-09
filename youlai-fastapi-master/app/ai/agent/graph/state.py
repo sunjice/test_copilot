@@ -24,8 +24,6 @@ class AgentState(MessagesState):
     system_prompt: str = ""
 
     # ── 页面上下文（来自前端 aiContext 注册） ──
-    project_id: int | None = None
-    suite_id: int | None = None
     page_type: str = ""
     context_json: dict[str, Any] = {}
 

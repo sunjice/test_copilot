@@ -69,11 +69,11 @@ class ChatUseCase:
         # 0. 校验会话所有权
         session = await self.session.get_session(session_id, user_id=owner_id)
 
-        # 1. 保存用户消息
-        await self.message.add_message(session_id, "user", req.content)
+        # 1. 获取历史消息（必须在保存当前用户消息之前，避免 history 中包含当前消息）
+        history = await self.message.get_message_history(session_id, limit=29, user_id=owner_id)
 
-        # 2. 获取会话上下文
-        history = await self.message.get_message_history(session_id, limit=30, user_id=owner_id)
+        # 2. 保存用户消息
+        await self.message.add_message(session_id, "user", req.content)
         context = SessionContext(
             session_id=session_id,
             domain=session.domain,

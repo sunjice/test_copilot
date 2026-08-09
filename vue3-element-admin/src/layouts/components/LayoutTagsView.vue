@@ -293,6 +293,14 @@ const addCurrentTag = () => {
   if (!route.meta?.title) return;
   if (isExternal(route.path) || isExternal(route.fullPath)) return;
 
+  // 标记为 singleTab 的路由，切换参数时只保留一个标签
+  if (route.meta.singleTab) {
+    const oldTag = tagsViewStore.visitedViews.find((v) => v.name === route.name);
+    if (oldTag) {
+      tagsViewStore.delView(oldTag);
+    }
+  }
+
   tagsViewStore.addView({
     name: route.name as string,
     title: route.meta.title,

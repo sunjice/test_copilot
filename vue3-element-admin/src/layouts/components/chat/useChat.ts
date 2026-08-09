@@ -11,7 +11,33 @@ import type {
   ChatDraft,
   SkillInfo,
   MessageSendReq,
+  Segment,
 } from "@/api/chat/types"
+
+/** 辅助：获取最后一个 segment */
+function lastSeg(segments: Segment[]): Segment | undefined {
+  return segments.length > 0 ? segments[segments.length - 1] : undefined
+}
+
+/** 追加文本到末尾 text 区块（若末尾非 text 则新建） */
+function appendText(segments: Segment[], content: string) {
+  const last = lastSeg(segments)
+  if (last && last.type === "text") {
+    last.content += content
+  } else {
+    segments.push({ type: "text", content })
+  }
+}
+
+/** 追加思考内容到末尾 thinking 区块（若末尾非 thinking 则新建） */
+function appendThinking(segments: Segment[], content: string) {
+  const last = lastSeg(segments)
+  if (last && last.type === "thinking") {
+    last.content += content
+  } else {
+    segments.push({ type: "thinking", content, startedAt: performance.now() })
+  }
+}
 
 export function useChat() {
   // ── 状态 ──
@@ -21,9 +47,8 @@ export function useChat() {
   const skills = ref<SkillInfo[]>([])
   const loading = ref(false)
   const streaming = ref(false)
-  const streamingText = ref("")
-  const thinkingStep = ref("")       // 当前正在执行的工具名称（Agent 模式）
-  const toolSteps = ref<string[]>([]) // 已完成工具调用记录
+  /** 当前流式回合的 Segment 区块数组（工具/文本/思考按时间线交错） */
+  const segments = ref<Segment[]>([])
   const activeDraft = ref<ChatDraft | null>(null)
   const showDraftPanel = ref(false)
   const loadingSessions = ref(false)
@@ -112,9 +137,7 @@ export function useChat() {
       abortController = null
     }
     streaming.value = false
-    streamingText.value = ""
-    thinkingStep.value = ""
-    toolSteps.value = []
+    segments.value = []
   }
 
   /** 重试最后一条消息（发送最后一条用户消息） */
@@ -140,7 +163,14 @@ export function useChat() {
     await sendMessage(lastUserContent)
   }
 
-  async function sendMessage(content: string): Promise<void> {
+  async function sendMessage(content: string, skillName?: string): Promise<void> {
+    // 解析 slash 命令：/case_review xxx → skill_name = case_review
+    let skill = skillName
+    if (!skill) {
+      const m = content.match(/^\/([a-zA-Z_][a-zA-Z0-9_]*)/)
+      if (m) skill = m[1]
+    }
+
     if (!activeSessionId.value) {
       // 自动创建会话，带上页面上下文
       const session = await createSession(undefined, { ...pageContext.value })
@@ -169,15 +199,13 @@ export function useChat() {
     addLocalMessage(userMsg)
 
     streaming.value = true
-    streamingText.value = ""
-    thinkingStep.value = ""
-    toolSteps.value = []
+    segments.value = []
 
     // 创建新的 AbortController
     abortController = new AbortController()
 
     try {
-      const req: MessageSendReq = { content }
+      const req: MessageSendReq = skill ? { content, skill_name: skill } : { content }
       const response = await ChatMessageAPI.send(sessionId, req, abortController.signal)
 
       if (!response.ok) {
@@ -215,12 +243,17 @@ export function useChat() {
 
               switch (eventType) {
                 case "thinking":
-                  // Agent 初始心跳，仅表示模型正在思考，不写入 thinkingStep
-                  // 由 StreamingBubble 默认显示「思考中...」
+                  // 思考内容流式推送：追加到末尾 thinking 区块（若末尾非 thinking 则新建）
+                  if (data.content) {
+                    appendThinking(segments.value, data.content)
+                  } else if (segments.value.length === 0 || (!lastSeg(segments.value)?.type.includes("thinking"))) {
+                    // Agent 初始心跳：创建思考区块并记录开始时间
+                    segments.value.push({ type: "thinking", content: "", startedAt: performance.now() })
+                  }
                   break
 
                 case "chunk":
-                  streamingText.value += data.content || ""
+                  appendText(segments.value, data.content || "")
                   break
 
                 case "skill_start":
@@ -228,16 +261,26 @@ export function useChat() {
                   break
 
                 case "tool_start":
-                  // Agent 模式：工具开始执行，更新 thinking 状态
-                  // 不再拼接到 streamingText，保持正文干净
-                  thinkingStep.value = data.name || "处理中"
+                  // 工具开始执行 → 新建 running 工具区块
+                  segments.value.push({
+                    type: "tool",
+                    name: data.name || "处理中",
+                    status: "running",
+                    startedAt: performance.now(),
+                  })
                   break
 
                 case "tool_end":
-                  // Agent 模式：工具执行完成
-                  if (data.name) toolSteps.value.push(data.name)
-                  thinkingStep.value = ""
-                  // 不再把工具摘要拼入 streamingText
+                  // 工具执行完成 → 结算最后一个 running 工具区块
+                  for (let i = segments.value.length - 1; i >= 0; i--) {
+                    const seg = segments.value[i]
+                    if (seg.type === "tool" && seg.status === "running") {
+                      seg.status = data.error ? "failed" : "done"
+                      seg.durationMs = Math.round(performance.now() - seg.startedAt)
+                      if (data.error) seg.error = data.error
+                      break
+                    }
+                  }
                   break
 
                 case "message":
@@ -267,27 +310,58 @@ export function useChat() {
       // SSE 流已结束，先关闭 streaming 占位符，再 push 真消息
       streaming.value = false
 
-      // 把本次 Agent 调用的工具列表合并进 metadata，不依赖 message 事件
-      if (toolSteps.value.length) {
+      // 把 segments 序列化到 metadata（仅纯文本消息需要，卡片类消息不附加 segments）
+      if (assistantMsgType === "text" && segments.value.length) {
+        // 流已结束，给未结算的思考区块补上 durationMs
+        const now = performance.now()
+        const finalizedSegments = segments.value.map((s) => {
+          if (s.type === "thinking" && s.startedAt != null && s.durationMs == null) {
+            return { ...s, durationMs: Math.round(now - s.startedAt) }
+          }
+          return s
+        })
+
+        // 合并连续的 text 区块为一个（避免 tool 打断 text 导致 TurnRenderer 渲染多段）
+        const merged: Segment[] = []
+        for (const seg of finalizedSegments) {
+          const last = merged.length > 0 ? merged[merged.length - 1] : null
+          if (seg.type === "text" && last && last.type === "text") {
+            last.content += seg.content
+          } else {
+            merged.push({ ...seg })
+          }
+        }
+
+        // 提取工具区块名称列表
+        const toolNames = merged
+          .filter((s): s is Segment & { type: "tool" } => s.type === "tool")
+          .map((s) => s.name)
+
         messageMetadata = {
           ...messageMetadata,
-          tool_names: [...toolSteps.value],
-          tool_calls: toolSteps.value.length,
+          segments: JSON.parse(JSON.stringify(merged)),
+          tool_names: toolNames,
+          tool_calls: toolNames.length,
         }
-        // 如果还没有 skill_name 但有技能，补充进来
         if (!messageMetadata.skill_name && skillName) {
           messageMetadata.skill_name = skillName
         }
       }
 
       // 添加助手消息
-      if (assistantContent || streamingText.value) {
+      if (assistantContent || segments.value.some(s => s.type === "text" && s.content)) {
+        // 从 segments 中提取纯文本拼接
+        const textFromSegments = segments.value
+          .filter((s): s is Segment & { type: "text" } => s.type === "text")
+          .map((s) => s.content)
+          .join("")
+
         const assistantMsg: ChatMessage = {
           id: null,
           session_id: sessionId,
           role: "assistant",
           msg_type: assistantMsgType,
-          content: assistantContent || streamingText.value,
+          content: assistantContent || textFromSegments,
           metadata_json: Object.keys(messageMetadata).length > 0
             ? messageMetadata
             : skillName
@@ -316,29 +390,50 @@ export function useChat() {
         }
       }
 
+      segments.value = []
+
       // 刷新会话列表（更新消息计数和时间）
       await loadSessions()
     } catch (e: any) {
       // 如果是用户主动中断，不显示错误
       if (e.name === "AbortError") {
         // 保留已输出的部分内容作为消息
-        if (streamingText.value) {
-          const md: Record<string, any> = {}
-          if (toolSteps.value.length) {
-            md.tool_names = [...toolSteps.value]
-            md.tool_calls = toolSteps.value.length
+        if (segments.value.length) {
+          const textFromSegments = segments.value
+            .filter((s): s is Segment & { type: "text" } => s.type === "text")
+            .map((s) => s.content)
+            .join("")
+
+          if (textFromSegments) {
+            const now = performance.now()
+            const finalizedSegments = segments.value.map((s) => {
+              if (s.type === "thinking" && s.startedAt != null && s.durationMs == null) {
+                return { ...s, durationMs: Math.round(now - s.startedAt) }
+              }
+              return s
+            })
+            const md: Record<string, any> = {
+              segments: JSON.parse(JSON.stringify(finalizedSegments)),
+            }
+            const toolNames = finalizedSegments
+              .filter((s): s is Segment & { type: "tool" } => s.type === "tool")
+              .map((s) => s.name)
+            if (toolNames.length) {
+              md.tool_names = toolNames
+              md.tool_calls = toolNames.length
+            }
+            const partialMsg: ChatMessage = {
+              id: null,
+              session_id: sessionId,
+              role: "assistant",
+              msg_type: "text",
+              content: textFromSegments + "\n\n*[已停止生成]*",
+              metadata_json: Object.keys(md).length > 0 ? md : null,
+              draft_id: null,
+              create_time: new Date().toISOString(),
+            }
+            addLocalMessage(partialMsg)
           }
-          const partialMsg: ChatMessage = {
-            id: null,
-            session_id: sessionId,
-            role: "assistant",
-            msg_type: "text",
-            content: streamingText.value + "\n\n*[已停止生成]*",
-            metadata_json: Object.keys(md).length > 0 ? md : null,
-            draft_id: null,
-            create_time: new Date().toISOString(),
-          }
-          addLocalMessage(partialMsg)
         }
       } else {
         // 推送错误消息到列表
@@ -359,8 +454,7 @@ export function useChat() {
       }
     } finally {
       streaming.value = false
-      streamingText.value = ""
-      thinkingStep.value = ""
+      segments.value = []
       abortController = null
     }
   }
@@ -664,9 +758,7 @@ export function useChat() {
     loadingSessions,
     loadingMessages,
     streaming,
-    streamingText,
-    thinkingStep,
-    toolSteps,
+    segments,
     activeDraft,
     showDraftPanel,
     pageContext,

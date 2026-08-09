@@ -266,6 +266,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from "vue";
 import { useRoute, useRouter } from "vue-router";
+import { useTagsViewStore } from "@/stores/tags-view";
 import { ElMessage } from "element-plus";
 import { CircleCheck } from "@element-plus/icons-vue";
 import TaskAPI from "@/api/aitc/task";
@@ -277,6 +278,7 @@ import { useCaseReview, FIELD_LABEL_MAP, CASE_FIELD_ORDER, displayVal, type Fiel
 
 const route = useRoute();
 const router = useRouter();
+const tagsViewStore = useTagsViewStore();
 const taskId = String(route.params.taskId || "");
 const itemId = String(route.params.itemId || "");
 
@@ -379,20 +381,33 @@ const rawFormatted = computed(() => {
 });
 
 function goBack() {
-  router.push(`/aitc/tasks/${taskId}`);
+  // 先 replace 回任务详情（不新增历史/标签），再删除当前审核页标签
+  const currentTag = {
+    name: route.name as string,
+    title: route.meta.title as string,
+    path: route.path,
+    fullPath: route.fullPath,
+    icon: route.meta?.icon as string | undefined,
+    affix: route.meta?.affix,
+    keepAlive: route.meta?.keepAlive,
+    query: { ...route.query },
+  };
+  router.replace(`/aitc/tasks/${taskId}`).then(() => {
+    tagsViewStore.delView(currentTag);
+  });
 }
 
 function prevItem() {
   if (!hasPrev.value) return;
   const prev = allItems.value[currentIndex.value - 1];
-  router.push(`/aitc/tasks/${taskId}/case-review/${prev.id}`);
+  router.replace(`/aitc/tasks/${taskId}/case-review/${prev.id}`);
   loadItem(String(prev.id));
 }
 
 function nextItem() {
   if (!hasNext.value) return;
   const next = allItems.value[currentIndex.value + 1];
-  router.push(`/aitc/tasks/${taskId}/case-review/${next.id}`);
+  router.replace(`/aitc/tasks/${taskId}/case-review/${next.id}`);
   loadItem(String(next.id));
 }
 

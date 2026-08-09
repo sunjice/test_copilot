@@ -7,6 +7,8 @@
 - 使用 prebuilt 的 ToolNode（自带并行 tool_calls、错误处理）
 """
 
+import time
+
 from langchain_core.messages import SystemMessage
 from langchain_core.tools import BaseTool
 from langchain_openai import ChatOpenAI
@@ -42,6 +44,21 @@ def _get_or_create_llm(cfg: AiConfigSnapshot) -> ChatOpenAI:
             streaming=True,          # 必须开启，否则 astream_events 收不到 on_chat_model_stream
         )
     return _llm_cache[fp]
+
+
+async def prewarm_llm() -> None:
+    """应用启动时预热 LLM 客户端，避免首请求卡 2 秒等待 httpx 连接。"""
+    from app.ai.config import resolve_ai_config
+    from loguru import logger
+    t0 = time.time()
+    try:
+        cfg = resolve_ai_config("chat")
+        _get_or_create_llm(cfg)
+        dt = int((time.time() - t0) * 1000)
+        logger.info(f"LLM 预热完成 model={cfg.model} base_url={cfg.api_base} 耗时={dt}ms")
+    except Exception as e:
+        dt = int((time.time() - t0) * 1000)
+        logger.warning(f"LLM 预热失败（不影响正常使用）耗时={dt}ms error={e}")
 
 
 # ═══════════════ 图构建 ═══════════════

@@ -18,11 +18,18 @@ class ToolContext:
     db: AsyncSession
     session_id: int
     domain: str = "case"
-    project_id: int | None = None
-    suite_id: int | None = None
     page_type: str = ""
     context_json: dict[str, Any] = field(default_factory=dict)
     user_id: int = 0  # 操作人 ID，用于审计和权限控制
+
+    # ── 域专属 ID，统一从 context_json 读取（与 SessionContext 模式一致） ──
+    @property
+    def project_id(self) -> int | None:
+        return self.context_json.get("project_id")
+
+    @property
+    def suite_id(self) -> int | None:
+        return self.context_json.get("suite_id")
 
 
 # 工具工厂类型

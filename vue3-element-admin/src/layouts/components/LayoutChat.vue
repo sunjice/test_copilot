@@ -110,7 +110,7 @@
               v-for="q in quickActions"
               :key="q.title"
               class="quick-action-card"
-              @click="onQuickSend(q.prompt)"
+              @click="onQuickSend(q)"
             >
               <div class="quick-action-icon" :style="{ background: q.bg }">
                 <el-icon :size="18"><component :is="q.icon" /></el-icon>
@@ -137,9 +137,7 @@
 
         <StreamingBubble
           v-if="streaming"
-          :streaming-text="streamingText"
-          :thinking-step="thinkingStep"
-          :tool-steps="toolSteps"
+          :segments="segments"
         />
       </div>
 
@@ -187,8 +185,39 @@
         :style="{ height: inputHeight + 'px' }"
         @mousedown="onInputMouseDown"
       >
+        <!-- "/" 命令补全面板 -->
+        <div v-if="showSlashPanel" class="slash-panel" @mousedown.stop>
+          <template v-if="filteredSkills.length">
+            <div
+              v-for="(s, idx) in filteredSkills"
+              :key="s.name"
+              :class="['slash-item', { active: idx === slashIndex }]"
+              @mouseenter="slashIndex = idx"
+              @mousedown.prevent="onSlashSelect(s)"
+            >
+              <div class="slash-item-main">
+                <span class="slash-cmd">/{{ s.name }}</span>
+                <span class="slash-label">{{ skillLabel(s.name) }}</span>
+              </div>
+              <div class="slash-item-right">
+                <span class="slash-desc" :title="s.description">{{ s.description }}</span>
+                <el-tag
+                  size="small"
+                  effect="plain"
+                  :type="s.mode === 'ASYNC' ? 'warning' : 'success'"
+                  class="slash-mode-tag"
+                >
+                  {{ s.mode === 'ASYNC' ? '异步' : '同步' }}
+                </el-tag>
+              </div>
+            </div>
+          </template>
+          <div v-else class="slash-empty">无匹配命令</div>
+        </div>
+
         <div class="input-box">
           <el-input
+            ref="inputRef"
             v-model="text"
             type="textarea"
             :placeholder="inputPlaceholder as string"
@@ -251,7 +280,8 @@ import { useChat } from "./chat/useChat"
 import { useAiContextStore } from "@/stores/aiContext"
 import { useChatResize, useInputResize, RESIZE_DIRS } from "./chat/useChatResize"
 import { formatHistoryTime } from "./chat/utils"
-import type { ChatSession } from "@/api/chat/types"
+import { TASK_TYPE_MAP } from "@/views/aitc/constants"
+import type { ChatSession, SkillInfo } from "@/api/chat/types"
 
 // ── 全局状态（组件实例不会被销毁，因为 LayoutMain 不会切换） ──
 const isOpen = ref(false)
@@ -306,10 +336,9 @@ const {
   sessions,
   activeSessionId,
   messages,
+  skills,
   streaming,
-  streamingText,
-  thinkingStep,
-  toolSteps,
+  segments,
   pageContext,
   createSession,
   selectSession,
@@ -500,12 +529,87 @@ async function send() {
   const val = text.value.trim()
   if (!val || streaming.value) return
   text.value = ""
+  slashClosed.value = false
 
   await sendMessage(val)
 }
 
+// ── "/" 命令补全 ──
+const inputRef = ref()
+const slashIndex = ref(0)
+const slashClosed = ref(false) // Esc 关闭后，在清空/换行前不再弹出
+
+/** 正在输入的命令关键词（仅当输入以 / 开头且未输入空格时有效） */
+const slashKeyword = computed(() => {
+  const t = text.value
+  if (!t.startsWith("/")) return null
+  const cmd = t.slice(1)
+  if (/\s/.test(cmd)) return null
+  return cmd.toLowerCase()
+})
+
+const filteredSkills = computed(() => {
+  const kw = slashKeyword.value
+  if (kw === null) return []
+  return skills.value.filter((s) => s.name.toLowerCase().startsWith(kw))
+})
+
+const showSlashPanel = computed(
+  () => slashKeyword.value !== null && !slashClosed.value && !streaming.value
+)
+
+watch(slashKeyword, () => {
+  slashIndex.value = 0
+})
+
+watch(text, (v) => {
+  // 文本不再以 / 开头时，重置 Esc 关闭状态
+  if (!v.startsWith("/")) slashClosed.value = false
+})
+
+/** 技能命令 → 中文标签（优先使用更完整的描述） */
+const SKILL_LABELS: Record<string, string> = {
+  core_select: "挑选核心用例",
+  case_review: "审核用例质量",
+  script_gen: "生成测试脚本",
+  case_complete: "完善测试用例",
+  case_design: "设计测试用例",
+}
+
+function skillLabel(name: string): string {
+  return SKILL_LABELS[name] || TASK_TYPE_MAP[name]?.label || name
+}
+
+function onSlashSelect(s: SkillInfo) {
+  text.value = `/${s.name} `
+  slashClosed.value = false
+  nextTick(() => inputRef.value?.focus())
+}
+
 function onKeydown(e: Event | KeyboardEvent) {
   if (!(e instanceof KeyboardEvent)) return
+  // "/" 命令面板键盘导航
+  if (showSlashPanel.value && filteredSkills.value.length) {
+    if (e.key === "ArrowDown") {
+      e.preventDefault()
+      slashIndex.value = (slashIndex.value + 1) % filteredSkills.value.length
+      return
+    }
+    if (e.key === "ArrowUp") {
+      e.preventDefault()
+      slashIndex.value = (slashIndex.value - 1 + filteredSkills.value.length) % filteredSkills.value.length
+      return
+    }
+    if (e.key === "Enter" || e.key === "Tab") {
+      e.preventDefault()
+      onSlashSelect(filteredSkills.value[slashIndex.value])
+      return
+    }
+    if (e.key === "Escape") {
+      slashClosed.value = true
+      return
+    }
+  }
   if (e.key === "Enter" && !e.shiftKey) {
     e.preventDefault()
     send()
@@ -572,9 +676,7 @@ const contextBarItems = computed<ContextItem[]>(() => {
 })
 
 const inputPlaceholder = computed(() => {
-  const page = pageContext.value?.current_page
-  if (page === "case") return `提问、@（提及）或使用" / "进行操作`
-  return "有什么我可以帮你的？"
+  return `提问，或输入 "/" 触发任务命令`
 })
 
 // ── 快捷提问（Rovo 风格卡片） ──
@@ -582,6 +684,7 @@ interface QuickAction {
   title: string
   desc: string
   prompt: string
+  skill: string
   icon: any
   bg: string
 }
@@ -590,29 +693,32 @@ const quickActions = shallowRef<QuickAction[]>([
   {
     title: "挑选核心用例",
     desc: "从当前模块智能挑选最重要的用例",
-    prompt: "帮我挑选核心用例",
+    prompt: "/core_select 帮我挑选核心用例",
+    skill: "core_select",
     icon: Search,
     bg: "linear-gradient(135deg, #e0f2fe 0%, #bae6fd 100%)",
   },
   {
     title: "审核用例质量",
     desc: "检查字段完整性和步骤规范性",
-    prompt: "审核用例质量",
+    prompt: "/case_review 审核用例质量",
+    skill: "case_review",
     icon: View,
     bg: "linear-gradient(135deg, #dcfce7 0%, #bbf7d0 100%)",
   },
   {
     title: "完善测试用例",
     desc: "自动补全用例的缺失字段和测试步骤",
-    prompt: "完善测试用例",
+    prompt: "/case_complete 完善测试用例",
+    skill: "case_complete",
     icon: EditPen,
     bg: "linear-gradient(135deg, #ffedd5 0%, #fed7aa 100%)",
   },
 ])
 
-async function onQuickSend(prompt: string) {
+async function onQuickSend(action: QuickAction) {
   if (streaming.value) return
-  await sendMessage(prompt)
+  await sendMessage(action.prompt, action.skill)
 }
 
 // ── 会话操作 ──
@@ -666,8 +772,15 @@ function scrollToBottom() {
 }
 
 // 自动滚动（用户没有手动上翻时）
+// 监听末区块内容长度：打字机效果是追加到末尾 text/thinking 区块，数组长度不变，需监听内容变化
+const lastSegContentLen = computed(() => {
+  const last = segments.value[segments.value.length - 1]
+  if (!last) return 0
+  return (last.type === "text" || last.type === "thinking") ? last.content.length : 0
+})
+
 watch(
-  () => [messages.value.length, streamingText.value],
+  () => [messages.value.length, segments.value.length, lastSegContentLen.value],
   async () => {
     await nextTick()
     if (!userScrolledUp.value && msgListRef.value) {
@@ -1273,5 +1386,83 @@ defineExpose({ toggle, isOpen })
 
 .fill-textarea :deep(.el-textarea__inner::placeholder) {
   color: var(--el-text-color-placeholder);
+}
+
+/* ── "/" 命令补全面板 ── */
+.slash-panel {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 12px;
+  right: 12px;
+  max-height: 260px;
+  overflow-y: auto;
+  background: var(--el-bg-color);
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 12px;
+  box-shadow: 0 -6px 24px rgba(0, 0, 0, 0.08);
+  padding: 4px;
+  z-index: 20;
+}
+
+.slash-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.slash-item.active {
+  background: var(--el-fill-color-light);
+}
+
+.slash-item-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.slash-cmd {
+  font-size: 12px;
+  font-weight: 600;
+  font-family: monospace;
+  color: var(--el-color-primary);
+}
+
+.slash-label {
+  font-size: 12px;
+  color: var(--el-text-color-primary);
+}
+
+.slash-item-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex: 1;
+  justify-content: flex-end;
+}
+
+.slash-desc {
+  font-size: 11px;
+  color: var(--el-text-color-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.slash-mode-tag {
+  flex-shrink: 0;
+}
+
+.slash-empty {
+  padding: 10px;
+  font-size: 12px;
+  color: var(--el-text-color-placeholder);
+  text-align: center;
 }
 </style>

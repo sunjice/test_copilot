@@ -69,5 +69,8 @@ class Settings(BaseSettings):
     DEBUG: bool = False
     LOG_LEVEL: str = "INFO"
 
+    # ── 性能计时 ──
+    TIMING_LOG_ENABLED: bool = True  # 控制 timing.log 是否启用
+
 
 settings = Settings()

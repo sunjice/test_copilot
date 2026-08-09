@@ -39,6 +39,10 @@ async def lifespan(app: FastAPI):
     cleanup = get_llm_log_cleanup()
     await cleanup.start()
 
+    # 预热 LLM 客户端（httpx 连接池），避免首请求卡 2 秒
+    from app.ai.agent.graph.builder import prewarm_llm
+    await prewarm_llm()
+
     yield
 
     await cleanup.stop()

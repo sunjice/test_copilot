@@ -24,177 +24,197 @@
     <!-- AI 消息：通栏排版，无气泡底色 -->
     <template v-else>
       <div class="msg-content">
-        <!-- 文本（完整 Markdown 渲染） -->
-        <div v-if="msg.msg_type === 'text'" class="msg-text" v-html="renderedContent" />
+        <!-- 时间线：思考/工具/文本按原始顺序统一走 TurnRenderer（与流式过程结构一致，避免重排） -->
+        <TurnRenderer v-if="msg.msg_type === 'text' && hasSegments" :segments="metadataSegments" />
 
-        <!-- 操作卡片（核心挑选/审核/脚本生成结果） -->
-        <div v-else-if="msg.msg_type === 'action_card'" class="msg-card">
-          <div class="msg-text" v-html="renderedContent" />
-          <div v-if="msg.metadata_json?.skill_name" class="card-meta">
-            技能：{{ msg.metadata_json.skill_name }}
-          </div>
-          <div v-if="msg.draft_id" class="card-actions">
-            <el-button size="small" type="primary" @click="$emit('viewDraft', msg.draft_id!)">
-              查看详情
-            </el-button>
-          </div>
-        </div>
+        <!-- 文本（无 segments 时兜底展示） -->
+        <div v-else-if="msg.msg_type === 'text'" class="msg-text" v-html="renderedContent" />
 
-        <!-- 草稿卡片 -->
-        <div v-else-if="msg.msg_type === 'draft_card'" class="msg-card">
-          <div class="msg-text" v-html="renderedContent" />
-          <div v-if="msg.metadata_json?.skill_name" class="card-meta">
-            草稿类型：{{ msg.metadata_json.skill_name }}
+          <!-- 操作卡片（核心挑选/审核/脚本生成结果） -->
+          <div v-else-if="msg.msg_type === 'action_card'" class="msg-card">
+            <div class="msg-text" v-html="renderedContent" />
+            <div v-if="msg.metadata_json?.skill_name" class="card-meta">
+              技能：{{ msg.metadata_json.skill_name }}
+            </div>
+            <div v-if="msg.draft_id" class="card-actions">
+              <el-button size="small" type="primary" @click="$emit('viewDraft', msg.draft_id!)">
+                查看详情
+              </el-button>
+            </div>
           </div>
-          <div v-if="!msg.metadata_json?.draft_status" class="card-actions">
-            <el-button size="small" type="primary" @click="$emit('viewDraft', msg.draft_id!)">
-              查看草稿
-            </el-button>
-            <el-button size="small" type="danger" plain @click="$emit('confirmDraft', 'discard')">
-              丢弃
-            </el-button>
-            <el-button size="small" type="success" @click="$emit('confirmDraft', 'confirm')">
-              确认采纳
-            </el-button>
-          </div>
-          <div v-else class="card-result" :class="msg.metadata_json.draft_status === 'confirm' ? 'success' : 'muted'">
-            {{ msg.metadata_json.draft_status === 'confirm' ? '已采纳' : '已丢弃' }}
-          </div>
-        </div>
 
-        <!-- 任务卡片 -->
-        <div v-else-if="msg.msg_type === 'task_card'" class="msg-card">
-          <div class="msg-text" v-html="renderedContent" />
-          <div class="card-actions">
-            <el-button size="small" type="primary" @click="goTaskDetail">
-              {{ taskButtonText }}
-            </el-button>
+          <!-- 草稿卡片 -->
+          <div v-else-if="msg.msg_type === 'draft_card'" class="msg-card">
+            <div class="msg-text" v-html="renderedContent" />
+            <div v-if="msg.metadata_json?.skill_name" class="card-meta">
+              草稿类型：{{ msg.metadata_json.skill_name }}
+            </div>
+            <div v-if="!msg.metadata_json?.draft_status" class="card-actions">
+              <el-button size="small" type="primary" @click="$emit('viewDraft', msg.draft_id!)">
+                查看草稿
+              </el-button>
+              <el-button size="small" type="danger" plain @click="$emit('confirmDraft', 'discard')">
+                丢弃
+              </el-button>
+              <el-button size="small" type="success" @click="$emit('confirmDraft', 'confirm')">
+                确认采纳
+              </el-button>
+            </div>
+            <div v-else class="card-result" :class="msg.metadata_json.draft_status === 'confirm' ? 'success' : 'muted'">
+              {{ msg.metadata_json.draft_status === 'confirm' ? '已采纳' : '已丢弃' }}
+            </div>
           </div>
-        </div>
 
-        <!-- 澄清卡片（LLM 向用户提问收集信息，支持多问题表单） -->
-        <div v-else-if="msg.msg_type === 'clarify_card'" class="msg-card">
-          <div class="msg-text" v-html="renderedContent" />
-          <div class="clarify-form">
-            <div
-              v-for="(q, idx) in clarifyQuestions"
-              :key="q.id"
-              class="clarify-field"
-              :class="{ 'clarify-field--first': idx === 0 }"
-            >
-              <label class="clarify-label">
-                <span v-if="clarifyQuestions.length > 1" class="clarify-num">{{ idx + 1 }}.</span>
-                {{ q.label }}
-                <span v-if="q.required" class="clarify-required">*</span>
-              </label>
-              <el-input
-                v-if="q.type === 'text'"
-                v-model="clarifyAnswers[q.id]"
-                :placeholder="q.placeholder || '请输入'"
-                size="small"
-              />
-              <el-select
-                v-else-if="q.type === 'select'"
-                v-model="clarifyAnswers[q.id]"
-                :placeholder="q.placeholder || '请选择'"
-                size="small"
-                class="clarify-select"
-                popper-class="clarify-popper"
-                placement="bottom-start"
-                fit-input-width
-                :popper-options="{ strategy: 'fixed' }"
+          <!-- 任务卡片 -->
+          <div v-else-if="msg.msg_type === 'task_card'" class="msg-card">
+            <div class="msg-text" v-html="renderedContent" />
+            <div class="card-actions">
+              <el-button size="small" type="primary" @click="goTaskDetail">
+                {{ taskButtonText }}
+              </el-button>
+            </div>
+          </div>
+
+          <!-- 澄清卡片（LLM 向用户提问收集信息，支持多问题表单） -->
+          <div v-else-if="msg.msg_type === 'clarify_card'" class="msg-card">
+            <div class="msg-text" v-html="renderedContent" />
+            <div class="clarify-form">
+              <div
+                v-for="(q, idx) in clarifyQuestions"
+                :key="q.id"
+                class="clarify-field"
+                :class="{ 'clarify-field--first': idx === 0 }"
               >
-                <el-option
-                  v-for="opt in (q.options || [])"
-                  :key="opt.id"
-                  :label="opt.label"
-                  :value="opt.id"
+                <label class="clarify-label">
+                  <span v-if="clarifyQuestions.length > 1" class="clarify-num">{{ idx + 1 }}.</span>
+                  {{ q.label }}
+                  <span v-if="q.required" class="clarify-required">*</span>
+                </label>
+                <el-input
+                  v-if="q.type === 'text'"
+                  v-model="clarifyAnswers[q.id]"
+                  :placeholder="q.placeholder || '请输入'"
+                  size="small"
                 />
-                <el-option value="__other__" label="其他（自定义输入）" />
-              </el-select>
-              <el-input
-                v-if="q.type === 'select' && clarifyAnswers[q.id] === '__other__'"
-                v-model="clarifyCustomValues[q.id]"
-                :placeholder="'请输入自定义的' + q.label"
-                size="small"
-                class="clarify-custom-input"
-              />
-            </div>
-          </div>
-          <div v-if="!clarifySubmitted" class="card-actions">
-            <el-button size="small" type="primary" :loading="clarifySubmitting" @click="handleClarifySubmit">
-              提交
-            </el-button>
-          </div>
-          <div v-else class="card-result muted">
-            {{ clarifyAnswersSummary || '已提交' }}
-          </div>
-        </div>
-
-        <!-- 确认卡片（任务创建前确认，支持多选项） -->
-        <div v-else-if="msg.msg_type === 'confirm_card'" class="msg-card">
-          <div class="msg-text" v-html="renderedContent" />
-
-          <!-- 多选项（如审核范围选择） -->
-          <div v-if="confirmOptions.length > 0 && confirmState === 'idle'" class="confirm-options">
-            <div
-              v-for="opt in confirmOptions"
-              :key="opt.id"
-              class="confirm-option"
-              :class="{ selected: selectedOptionId === opt.id }"
-              @click="selectedOptionId = opt.id"
-            >
-              <span class="option-radio">
-                <span v-if="selectedOptionId === opt.id" class="radio-dot" />
-              </span>
-              <span class="option-label">{{ opt.label }}</span>
-              <span v-if="opt.description" class="option-desc">{{ opt.description }}</span>
-            </div>
-          </div>
-
-          <div v-if="confirmState === 'idle'" class="card-actions">
-            <el-button size="small" type="primary" :loading="confirming" @click="handleConfirm">
-              确认创建
-            </el-button>
-            <el-button size="small" plain @click="handleCancel">
-              取消
-            </el-button>
-          </div>
-          <div v-else-if="confirmState === 'confirmed'" class="card-result success">
-            任务已创建
-          </div>
-          <div v-else class="card-result muted">
-            已取消
-          </div>
-        </div>
-
-        <!-- 其他类型直接渲染文本 -->
-        <div v-else class="msg-text" v-html="renderedContent" />
-
-        <!-- Agent 工具调用记录：可折叠思考过程 -->
-        <div v-if="hasToolActivity" class="msg-tool-steps">
-          <details class="tool-details">
-            <summary class="tool-summary">
-              <el-icon><Tools /></el-icon>
-              <span>思考过程（{{ toolCalls }} 个步骤）</span>
-            </summary>
-            <!-- 有工具名称列表：按名称展示 -->
-            <div v-if="toolNames.length" class="tool-list">
-              <div v-for="(name, i) in toolNames" :key="i" class="tool-item">
-                <span class="tool-step-idx">{{ i + 1 }}.</span>
-                <el-icon class="tool-check"><Check /></el-icon>
-                <span>{{ name }}</span>
+                <el-select
+                  v-else-if="q.type === 'select'"
+                  v-model="clarifyAnswers[q.id]"
+                  :placeholder="q.placeholder || '请选择'"
+                  size="small"
+                  class="clarify-select"
+                  popper-class="clarify-popper"
+                  placement="bottom-start"
+                  fit-input-width
+                  :popper-options="{ strategy: 'fixed' }"
+                >
+                  <el-option
+                    v-for="opt in (q.options || [])"
+                    :key="opt.id"
+                    :label="opt.label"
+                    :value="opt.id"
+                  />
+                  <el-option value="__other__" label="其他（自定义输入）" />
+                </el-select>
+                <el-input
+                  v-if="q.type === 'select' && clarifyAnswers[q.id] === '__other__'"
+                  v-model="clarifyCustomValues[q.id]"
+                  :placeholder="'请输入自定义的' + q.label"
+                  size="small"
+                  class="clarify-custom-input"
+                />
               </div>
             </div>
-            <!-- 无工具名称但 tool_calls > 0 的兜底列表 -->
-            <div v-else class="tool-list">
-              <div v-for="i in toolCalls" :key="i" class="tool-item">
-                <span class="tool-step-idx">{{ i }}.</span>
-                <el-icon class="tool-check"><Check /></el-icon>
-                <span>工具调用</span>
+            <div v-if="!clarifySubmitted" class="card-actions">
+              <el-button size="small" type="primary" :loading="clarifySubmitting" @click="handleClarifySubmit">
+                提交
+              </el-button>
+            </div>
+            <div v-else class="card-result muted">
+              {{ clarifyAnswersSummary || '已提交' }}
+            </div>
+          </div>
+
+          <!-- 确认卡片（任务创建前确认，支持多选项） -->
+          <div v-else-if="msg.msg_type === 'confirm_card'" class="msg-card">
+            <div class="msg-text" v-html="renderedContent" />
+
+            <!-- 多选项（如审核范围选择） -->
+            <div v-if="confirmOptions.length > 0 && confirmState === 'idle'" class="confirm-options">
+              <div
+                v-for="opt in confirmOptions"
+                :key="opt.id"
+                class="confirm-option"
+                :class="{ selected: selectedOptionId === opt.id }"
+                @click="selectedOptionId = opt.id"
+              >
+                <span class="option-radio">
+                  <span v-if="selectedOptionId === opt.id" class="radio-dot" />
+                </span>
+                <span class="option-label">{{ opt.label }}</span>
+                <span v-if="opt.description" class="option-desc">{{ opt.description }}</span>
               </div>
             </div>
-          </details>
+
+            <div v-if="confirmState === 'idle'" class="card-actions">
+              <el-button size="small" type="primary" :loading="confirming" @click="handleConfirm">
+                确认创建
+              </el-button>
+              <el-button size="small" plain @click="handleCancel">
+                取消
+              </el-button>
+            </div>
+            <div v-else-if="confirmState === 'confirmed'" class="card-result success">
+              任务已创建
+            </div>
+            <div v-else class="card-result muted">
+              已取消
+            </div>
+          </div>
+
+          <!-- 其他类型直接渲染文本 -->
+          <div v-else class="msg-text" v-html="renderedContent" />
+
+          <!-- Agent 工具调用记录：可折叠思考过程（旧数据兼容，无 segments 时使用） -->
+          <div v-if="hasToolActivity && !hasSegments" class="msg-tool-steps">
+            <details class="tool-details">
+              <summary class="tool-summary">
+                <el-icon><Tools /></el-icon>
+                <span>思考过程（{{ toolCalls }} 个步骤）</span>
+              </summary>
+              <!-- 有工具名称列表：按名称展示 -->
+              <div v-if="toolNames.length" class="tool-list">
+                <div v-for="(name, i) in toolNames" :key="i" class="tool-item">
+                  <span class="tool-step-idx">{{ i + 1 }}.</span>
+                  <el-icon class="tool-check"><Check /></el-icon>
+                  <span>{{ name }}</span>
+                </div>
+              </div>
+              <!-- 无工具名称但 tool_calls > 0 的兜底列表 -->
+              <div v-else class="tool-list">
+                <div v-for="i in toolCalls" :key="i" class="tool-item">
+                  <span class="tool-step-idx">{{ i }}.</span>
+                  <el-icon class="tool-check"><Check /></el-icon>
+                  <span>工具调用</span>
+                </div>
+              </div>
+            </details>
+          </div>
+
+        <!-- 消息操作栏（悬停显示） -->
+        <div class="msg-actions">
+          <el-button text size="small" class="action-btn" @click="copyContent" title="复制">
+            <el-icon><DocumentCopy /></el-icon>
+          </el-button>
+          <el-button text size="small" class="action-btn" @click="$emit('retry')" title="重新生成">
+            <el-icon><Refresh /></el-icon>
+          </el-button>
+          <span class="action-divider" />
+          <el-button text size="small" class="action-btn" :class="{ active: feedback === 'up' }" @click="setFeedback('up')" title="有帮助">
+            <el-icon><Select /></el-icon>
+          </el-button>
+          <el-button text size="small" class="action-btn" :class="{ active: feedback === 'down' }" @click="setFeedback('down')" title="没有帮助">
+            <el-icon><Close /></el-icon>
+          </el-button>
         </div>
 
         <div class="msg-time" :title="fullTime">{{ formatTime(msg.create_time) }}</div>
@@ -207,9 +227,10 @@
 import { computed, ref } from "vue"
 import { useRouter } from "vue-router"
 import { ElMessage } from "element-plus"
-import { Check, Tools, WarningFilled } from "@element-plus/icons-vue"
+import { Check, Tools, WarningFilled, DocumentCopy, Refresh, Select, Close } from "@element-plus/icons-vue"
 import { renderMarkdown, formatTimeHM, setupCodeCopy, exportTableToExcel } from "./utils"
-import type { ChatMessage } from "@/api/chat/types"
+import TurnRenderer from "./TurnRenderer.vue"
+import type { ChatMessage, Segment } from "@/api/chat/types"
 
 const props = defineProps<{
   msg: ChatMessage
@@ -226,6 +247,22 @@ const emit = defineEmits<{
 
 const router = useRouter()
 const confirming = ref(false)
+
+// ── 点赞/点踩反馈 ──
+type FeedbackType = 'up' | 'down' | null
+const feedback = ref<FeedbackType>(
+  (props.msg.metadata_json?._feedback as FeedbackType) || null
+)
+
+function setFeedback(type: FeedbackType) {
+  // 再次点击取消
+  feedback.value = feedback.value === type ? null : type
+  // 持久化到 metadata_json，刷新后保留
+  if (!props.msg.metadata_json) {
+    props.msg.metadata_json = {}
+  }
+  props.msg.metadata_json._feedback = feedback.value
+}
 const msgEl = ref<HTMLElement>()
 
 // ── 澄清卡片（clarify_card）逻辑 ──
@@ -360,7 +397,7 @@ function handleCancel() {
 
 const taskButtonText = computed(() => {
   const status = props.msg.metadata_json?.task_status
-  if (status === 2) return "查看审核结果"
+  if (status === 2) return "查看结果"
   if (status === 3) return "查看详情"
   return "查看任务进度"
 })
@@ -376,6 +413,40 @@ function goTaskDetail() {
 
 // 完整 Markdown 渲染
 const renderedContent = computed(() => renderMarkdown(props.msg.content || ""))
+
+// ── Segments 区块模型（新消息格式） ──
+
+/** 是否有 segments 数据 */
+const hasSegments = computed(() => {
+  const segs = props.msg.metadata_json?.segments
+  return Array.isArray(segs) && segs.length > 0
+})
+
+/** 从 metadata 中取出 segments */
+const metadataSegments = computed<Segment[]>(() => {
+  return (props.msg.metadata_json?.segments as Segment[]) || []
+})
+
+/** 复制消息内容（文本 + 工具记录） */
+function copyContent() {
+  let text = ""
+  if (hasSegments.value) {
+    // 从 segments 提取文本
+    for (const seg of metadataSegments.value) {
+      if (seg.type === "text") text += seg.content
+      else if (seg.type === "tool") {
+        const duration = seg.durationMs != null ? ` (${seg.durationMs < 1000 ? seg.durationMs + 'ms' : (seg.durationMs / 1000).toFixed(1) + 's'})` : ""
+        text += `\n[${seg.status === 'done' ? '✓' : seg.status === 'failed' ? '✕' : '○'} ${seg.name}${duration}]\n`
+      }
+    }
+  }
+  if (!text.trim()) text = props.msg.content || ""
+  navigator.clipboard.writeText(text.trim()).then(() => {
+    ElMessage.success("已复制")
+  }).catch(() => {
+    ElMessage.error("复制失败")
+  })
+}
 
 const TOOL_LABELS = new Map<string, string>([
   ["list_projects", "列出项目"],
@@ -965,6 +1036,41 @@ function onMsgClick(e: MouseEvent) {
 
 .chat-message:hover .msg-actions {
   opacity: 1;
+}
+
+.action-btn {
+  height: 22px;
+  width: 22px;
+  padding: 0;
+  margin: 0;
+  border: none;
+  color: var(--el-text-color-placeholder);
+  transition: color 0.15s;
+}
+
+.action-btn:hover {
+  color: var(--el-color-primary);
+}
+
+.action-btn :deep(.el-icon) {
+  font-size: 14px;
+}
+
+.action-divider {
+  display: inline-block;
+  width: 1px;
+  height: 12px;
+  background: var(--el-border-color-lighter);
+  margin: 0 2px;
+  align-self: center;
+}
+
+.action-btn.active {
+  color: var(--el-color-primary);
+}
+
+.action-btn.active:hover {
+  color: var(--el-color-primary);
 }
 </style>
 
