@@ -64,24 +64,6 @@ export const constantRoutes: RouteRecordRaw[] = [
         component: () => import("@/views/profile/notice/index.vue"),
         meta: { title: "我的通知", icon: "user", hidden: true },
       },
-      {
-        path: "/detail/:id(\\d+)",
-        name: "DemoDetail",
-        component: () => import("@/views/demo/detail.vue"),
-        meta: { title: "详情页缓存", icon: "user", hidden: true, keepAlive: true },
-      },
-      {
-        path: "product/detail/:id(\\d+)",
-        name: "ProductDetail",
-        component: () => import("@/views/product/detail.vue"),
-        meta: { title: "产品详情", hidden: true },
-      },
-      {
-        path: "product/compare",
-        name: "ProductCompare",
-        component: () => import("@/views/product/compare.vue"),
-        meta: { title: "产品对比", hidden: true },
-      },
       // AITC 子页面（动态菜单会自动注册，此处保留作为显式声明）
       {
         path: "aitc/tasks/:taskId(\\d+)",

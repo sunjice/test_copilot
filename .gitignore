@@ -19,12 +19,15 @@ build/
 htmlcov/
 coverage.xml
 uploads/
-app/alembic/versions/*.pyc
 
 # 临时测试脚本（防止调试文件带密钥提交）
 _*.py
 *_backup.py
 *_backup.json
+*_backup.sql
+
+# Python lock file (由 uv 生成)
+uv.lock
 
 # =============================================
 # Node / Vue3 (vue3-element-admin)
@@ -39,6 +42,7 @@ stats.html
 .stylelintcache
 package-lock.json
 yarn.lock
+pnpm-lock.yaml
 
 # =============================================
 # Editors & OS
@@ -54,6 +58,12 @@ yarn.lock
 .DS_Store
 Thumbs.db
 .history
+
+# 日志文件
+timing.log
+
+# skills lock
+skills-lock.json
 
 # =============================================
 # CodeBuddy

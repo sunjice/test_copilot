@@ -1,0 +1,70 @@
+## 用户需求
+项目准备迁移到服务器进行试运行，主要发布 AI 相关功能。需要全面梳理项目前后端结构，列出与 AI 功能无关的代码和内容，生成可删除清单及对应的数据库清理 SQL，待用户确认后执行删除。
+
+## 项目背景
+AITC（AI Test Companion）是测试部 AI 助手平台。核心功能包括：AI 对话（SSE 流式，6 个领域技能）、AI Agent（LangGraph 编排）、AI 任务体系（挑核心用例、用例审核、用例补全、脚本生成）、LLM 调用日志、用例/样本/脚本/规范管理、产品数据库。
+
+## 核心功能（必须保留）
+- **后端**：app/ai/（AI Agent + Chat + LLM Log）、app/aitc/（用例/样本/脚本/规范/任务）、app/system/product/（产品数据库）、app/auth/（认证）、app/system/user/（用户）、app/system/role/（角色）、app/system/menu/（菜单）、app/system/log/（操作日志）、app/tool/sse/（SSE 推送）
+- **前端**：src/views/aitc/、src/views/product/、src/views/dashboard/、src/views/login/、src/views/profile/、src/views/error/、src/api/aitc/、src/api/chat/、src/api/auth/、src/api/system/(user|role|menu|log)/、src/api/product/、src/stores/aiContext.ts、src/layouts/
+- **数据库表**：ai_tc_* 系列（10 张 AITC 表）、chat_sessions、chat_messages、ai_llm_logs、product_* 系列、sys_user、sys_role、sys_menu、sys_role_menu、sys_user_role、sys_log
+
+## 技术方案概述
+
+### 策略
+基于已验证的代码依赖关系（通过 import 追踪和路由引用检查），将项目内容分为三类：
+1. **必须保留**：AI 核心功能及其直接依赖项
+2. **可安全删除**：未被 AI 功能引用、仅属于通用后台管理模板的功能
+3. **需用户决策**：与 AI 功能有弱关联但非核心的模块
+
+### 关键依赖分析结论
+
+#### 后端依赖链
+```
+AI Chat Router → auth (认证) → user/role/menu (基础权限)
+AITC Router → auth (认证) → user/role/menu (基础权限)
+product (产品) → 独立模块，AI 不直接引用但属于业务域
+sse (SSE) → 仅 auth 依赖，AI Chat 使用独立的 SSE 实现
+```
+
+**后端可删除模块**（确认无 AI/aitc 引用）：
+- `app/captcha/` — 验证码（仅 auth 引用，登录可去除验证码）
+- `app/system/config/` — 系统配置（无 AI 引用）
+- `app/system/dept/` — 部门管理（无 AI 引用）
+- `app/system/dict/` — 字典管理（无 AI 引用）
+- `app/system/notice/` — 通知公告（无 AI 引用）
+- `app/tool/codegen/` — 代码生成器（无 AI 引用）
+- `app/tool/file/` — 文件管理（无 AI 引用，仅 main.py 注册）
+- `app/tool/wxma/` — 微信小程序认证（无 AI 引用）
+- `app/auth/qr_code.py` — 扫码登录（无 AI 引用）
+
+#### 前端依赖链
+```
+登录 → stores/user → stores/dict（字典缓存）→ stores/permission → 菜单路由
+布局 → TenantSwitcher → stores/tenant
+```
+
+**前端可删除内容**：
+- `src/views/demo/` — 32 个示例页面
+- `src/views/system/dept/`、`dict/`、`config/`、`notice/`、`app/`、`tenant/` — 无关后台页面
+- `src/views/codegen/` — 代码生成器页面
+- `src/api/system/(dept|dict|config|notice|tenant|app)/` — 无关 API
+- `src/api/codegen/`、`src/api/file/` — 无关 API
+- `src/stores/dict.ts`、`src/stores/tenant.ts` — 无关 store
+- `src/components/(DictSelect|DictTag|TenantSwitcher|NoticeDropdown|WangEditor)/` — 无关组件
+- `mock/` 目录 — 全部 10 个 mock 文件
+- `src/composables/sse/useDictSync.ts` — 字典同步
+- `src/components/Upload/` — 文件上传组件（如无 AI 使用）
+
+#### 需用户决策的模块
+- **文件管理（file）**：AI Chat 可能未来需要上传文件，当前未引用
+- **操作日志（log）**：审计用途，当前未被 AI 引用但建议保留
+- **前端 Upload 组件**：如 AI Chat 未来支持文件上传则需保留
+
+## TODOS
+
+- [ ] 整理完整可删除清单（后端文件、前端文件、数据库表、根目录文件），按安全等级分"可安全删除"和"需用户决策"两类
+- [ ] 生成数据库清理 SQL 脚本，包含删除无关表、无关菜单权限记录、无关角色的语句，含备份检查和回滚语句
+- [ ] 分析前端依赖耦合点（stores/user 引用 stores/dict、布局引用 TenantSwitcher），生成解耦修改方案
+- [ ] 分析后端依赖耦合点（main.py 路由注册、registry.py 模型注册、auth 引用 captcha），生成解耦修改方案
+- [ ] 生成汇总文档，包含：删除清单总览、SQL 脚本、依赖解耦方案、预估节省空间、迁移执行步骤
