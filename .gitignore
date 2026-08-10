@@ -9,6 +9,7 @@ build/
 .venv/
 .uv/
 .env
+.env.*.bak
 *.egg
 !.env.example
 .pytest_cache/
