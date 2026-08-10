@@ -49,9 +49,7 @@ pnpm-lock.yaml
 # Editors & OS
 # =============================================
 .idea/
-.vscode/*
-!.vscode/extensions.json
-!.vscode/settings.json
+.vscode/
 *.suo
 *.ntvs*
 *.njsproj
