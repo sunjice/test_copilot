@@ -22,7 +22,7 @@ import app.registry  # noqa: F401  注册全部域模型，供 mapper 配置时�
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用启动初始化、关闭释放资源。"""
-    logger.info(f"youlai-fastapi starting | session_type={settings.SESSION_TYPE}")
+    logger.info(f"test-copilot starting | session_type={settings.SESSION_TYPE}")
 
     # 启动 AI 任务调度器（DB 轮询 + Redis 分布式锁）
     from app.ai.agent.tasks.scheduler import get_scheduler
@@ -49,14 +49,14 @@ async def lifespan(app: FastAPI):
     await scheduler.stop()
     await worker.stop()
     await close_redis()
-    logger.info("youlai-fastapi shutdown complete")
+    logger.info("test-copilot shutdown complete")
 
 
 def create_app() -> FastAPI:
     """构建 FastAPI 实例，注册路由、中间件与异常处理器。"""
     app = FastAPI(
-        title="youlai-fastapi",
-        description="youlai-fastapi 企业级权限管理系统后端",
+        title="test-copilot",
+        description="test-copilot AI 测试助手平台后端",
         version="1.0.0",
         docs_url="/docs",
         redoc_url="/redoc",
@@ -82,7 +82,7 @@ def create_app() -> FastAPI:
     # ── 健康检查端点 ──
     @app.get("/health", tags=["系统"], summary="健康检查")
     async def health_check():
-        return {"status": "ok", "service": "youlai-fastapi"}
+        return {"status": "ok", "service": "test-copilot"}
 
     # ── 注册路由 ──
     from app.auth.router import router as auth_router

@@ -1,17 +1,97 @@
-# Milvus + Elasticsearch 向量化 & BM25 检索
-# 加入到已有的 product_db_youlai-net 网络
-version: "3.8"
+# ============================================================
+# test-copilot 统一 Docker Compose 编排
+# 
+# 包含全部服务：PostgreSQL + Redis + MinIO + Elasticsearch +
+# Etcd + Milvus + FastAPI 后端
+#
+# 使用方法：
+#   1. 构建 ES 镜像: cd docker/elasticsearch && bash build.sh
+#   2. 改 .env.local：AI_API_KEY / Embedding / 容器内网地址（见部署指南）
+#   3. 启动: docker compose up -d
+#   4. 初始化数据库:
+#      docker compose exec -T tc-postgres psql -U youlai -d youlai_admin \
+#        < youlai-fastapi-master/sql/postgresql/youlai-admin.sql
+#      docker compose exec -T tc-postgres psql -U youlai -d youlai_admin \
+#        < youlai-fastapi-master/sql/postgresql/youlai-aitc.sql
+# ============================================================
 
 services:
   # ============================================
-  # Elasticsearch (单节点，BM25全文检索)
+  # PostgreSQL 16 (数据库)
+  # ============================================
+  postgres:
+    image: postgres:16-alpine
+    container_name: tc-postgres
+    environment:
+      POSTGRES_DB: youlai_admin
+      POSTGRES_USER: youlai
+      POSTGRES_PASSWORD: Youlai@2026
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks:
+      - tc-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U youlai -d youlai_admin"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # ============================================
+  # Redis 7 (缓存)
+  # ============================================
+  redis:
+    image: redis:7-alpine
+    container_name: tc-redis
+    command: redis-server --requirepass TestCopilot@2026 --save 60 1 --appendonly yes
+    volumes:
+      - redis-data:/data
+    ports:
+      - "6379:6379"
+    networks:
+      - tc-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "TestCopilot@2026", "--no-auth-warning", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # ============================================
+  # MinIO (对象存储 — 文件上传 + Milvus 依赖)
+  # ============================================
+  minio:
+    image: minio/minio:RELEASE.2025-04-08T15-41-24Z
+    container_name: tc-minio
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    command: minio server /data --console-address ":9001"
+    volumes:
+      - minio-data:/data
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # Web 控制台
+    networks:
+      - tc-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  # ============================================
+  # Elasticsearch 8.17.1 + IK 中文分词
   # ============================================
   elasticsearch:
     build:
       context: ./docker/elasticsearch
       dockerfile: Dockerfile
-    image: product-es-ik:8.17.1
-    container_name: product-es
+    image: tc-es-ik:8.17.1
+    container_name: tc-es
     environment:
       - discovery.type=single-node
       - ES_JAVA_OPTS=-Xms512m -Xmx512m
@@ -24,7 +104,7 @@ services:
     volumes:
       - es-data:/usr/share/elasticsearch/data
     networks:
-      - youlai-net
+      - tc-net
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "curl -s http://localhost:9200/_cluster/health | grep -q -E 'green|yellow'"]
@@ -33,11 +113,11 @@ services:
       retries: 30
 
   # ============================================
-  # Etcd (Milvus 依赖)
+  # Etcd (Milvus 元数据依赖)
   # ============================================
   etcd:
     image: quay.io/coreos/etcd:v3.5.18
-    container_name: product-etcd
+    container_name: tc-etcd
     environment:
       - ETCD_AUTO_COMPACTION_MODE=revision
       - ETCD_AUTO_COMPACTION_RETENTION=1000
@@ -47,33 +127,10 @@ services:
     volumes:
       - etcd-data:/etcd
     networks:
-      - youlai-net
+      - tc-net
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "etcdctl", "endpoint", "health"]
-      interval: 10s
-      timeout: 5s
-      retries: 30
-
-  # ============================================
-  # MinIO (Milvus 对象存储)
-  # ============================================
-  minio:
-    image: minio/minio:RELEASE.2025-04-08T15-41-24Z
-    container_name: product-minio
-    environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
-    command: minio server /minio_data --console-address ":9001"
-    volumes:
-      - minio-data:/minio_data
-    ports:
-      - "9001:9001"
-    networks:
-      - youlai-net
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
       interval: 10s
       timeout: 5s
       retries: 30
@@ -83,13 +140,13 @@ services:
   # ============================================
   milvus:
     image: milvusdb/milvus:v2.5.4
-    container_name: product-milvus
+    container_name: tc-milvus
     command: ["milvus", "run", "standalone"]
     security_opt:
       - seccomp:unconfined
     environment:
-      ETCD_ENDPOINTS: etcd:2379
-      MINIO_ADDRESS: minio:9000
+      ETCD_ENDPOINTS: tc-etcd:2379
+      MINIO_ADDRESS: tc-minio:9000
       MINIO_ACCESS_KEY_ID: minioadmin
       MINIO_SECRET_ACCESS_KEY: minioadmin
     volumes:
@@ -98,7 +155,7 @@ services:
       - "19530:19530"
       - "9091:9091"
     networks:
-      - youlai-net
+      - tc-net
     depends_on:
       etcd:
         condition: service_healthy
@@ -111,17 +168,54 @@ services:
       timeout: 5s
       retries: 30
 
+  # ============================================
+  # FastAPI 后端
+  # ============================================
+  api:
+    build:
+      context: ./youlai-fastapi-master
+      dockerfile: Dockerfile
+    image: tc-api:latest
+    container_name: tc-api
+    env_file:
+      - ./youlai-fastapi-master/.env
+      - ./youlai-fastapi-master/.env.local
+    ports:
+      - "8000:8000"
+    networks:
+      - tc-net
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+      milvus:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
 networks:
-  youlai-net:
-    name: product_db_youlai-net
-    external: true
+  tc-net:
+    name: tc-net
+    driver: bridge
 
 volumes:
-  es-data:
-    name: product_es_data
-  etcd-data:
-    name: product_etcd_data
+  redis-data:
+    name: tc_redis_data
+  pgdata:
+    name: tc_pgdata
   minio-data:
-    name: product_minio_data
+    name: tc_minio_data
+  es-data:
+    name: tc_es_data
+  etcd-data:
+    name: tc_etcd_data
   milvus-data:
-    name: product_milvus_data
+    name: tc_milvus_data

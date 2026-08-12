@@ -49,14 +49,6 @@ export default defineConfig(({ mode }: ConfigEnv): UserConfig => {
           target: env.VITE_APP_API_URL,
           rewrite: (path: string) => path.replace(new RegExp(`^${env.VITE_APP_BASE_API}`), ""),
         },
-        // PageAgent Spike: CORS 兜底代理
-        // 如果浏览器直连 LLM 被 CORS 拦截，将 .env.development.local 中
-        // VITE_AGENT_BASE_URL 改为 /agent-llm/v1
-        "/agent-llm": {
-          changeOrigin: true,
-          target: env.VITE_AGENT_PROXY_TARGET || "https://api.deepseek.com",
-          rewrite: (path: string) => path.replace(/^\/agent-llm/, ""),
-        },
       },
     },
     plugins: [

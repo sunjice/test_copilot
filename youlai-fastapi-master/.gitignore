@@ -6,8 +6,11 @@ build/
 .venv/
 .uv/
 .env
+.env.local
 *.egg
 !.env.example
+!.env.local.example
+!.env.production.example
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/

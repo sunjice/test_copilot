@@ -11,15 +11,6 @@ interface ImportMetaEnv {
   readonly VITE_APP_TITLE?: string;
   readonly VITE_APP_TENANT_ENABLED?: string;
   readonly VITE_MOCK_DEV_SERVER: boolean;
-
-  /** PageAgent Spike：LLM 直连地址（OpenAI 兼容格式） */
-  readonly VITE_AGENT_BASE_URL?: string;
-  /** PageAgent Spike：API 密钥 */
-  readonly VITE_AGENT_API_KEY?: string;
-  /** PageAgent Spike：模型名称 */
-  readonly VITE_AGENT_MODEL?: string;
-  /** PageAgent Spike：CORS 代理目标（直连被拦截时切换到 /agent-llm 路径） */
-  readonly VITE_AGENT_PROXY_TARGET?: string;
 }
 
 interface ImportMeta {

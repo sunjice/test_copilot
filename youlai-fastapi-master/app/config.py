@@ -14,10 +14,10 @@ class Settings(BaseSettings):
     )
 
     # ── 数据库 ──
-    DATABASE_URL: str = "postgresql+asyncpg://youlai:Youlai%402026@www.youlai.tech:15432/youlai_admin"
+    DATABASE_URL: str = "postgresql+asyncpg://youlai:Youlai%402026@tc-postgres:5432/youlai_admin"
 
     # ── Redis ──
-    REDIS_URL: str = "redis://:123456@www.youlai.tech:6379/0"
+    REDIS_URL: str = "redis://:TestCopilot@2026@tc-redis:6379/0"
 
     # ── 认证 ──
     SESSION_TYPE: str = "jwt"
@@ -27,9 +27,9 @@ class Settings(BaseSettings):
     ALLOW_MULTI_LOGIN: bool = True
 
     # ── MinIO ──
-    MINIO_ENDPOINT: str = "111.229.83.153:9000"
-    MINIO_ACCESS_KEY: str = "bybaddp7zyARpgNbEGKf"
-    MINIO_SECRET_KEY: str = "p9rBdQZPBIJcMH23iyFkZkXmmawbmwPlk3JLlaaj"
+    MINIO_ENDPOINT: str = "tc-minio:9000"
+    MINIO_ACCESS_KEY: str = "minioadmin"
+    MINIO_SECRET_KEY: str = "minioadmin"
     MINIO_BUCKET: str = "public"
     MINIO_SECURE: bool = False
 
@@ -73,12 +73,12 @@ class Settings(BaseSettings):
     TIMING_LOG_ENABLED: bool = True  # 控制 timing.log 是否启用
 
     # ── Elasticsearch ──
-    ES_HOST: str = "http://localhost:9200"
+    ES_HOST: str = "http://tc-es:9200"
     ES_INDEX_CASE: str = "tc_cases"
     ES_INDEX_BUG: str = "tc_bugs"
 
     # ── Milvus ──
-    MILVUS_HOST: str = "localhost"
+    MILVUS_HOST: str = "tc-milvus"
     MILVUS_PORT: int = 19530
     MILVUS_COLLECTION_CASE: str = "tc_cases"
     MILVUS_COLLECTION_BUG: str = "tc_bugs"

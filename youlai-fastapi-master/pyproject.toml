@@ -27,7 +27,6 @@ dependencies = [
     # ORM
     "sqlalchemy[asyncio]>=2.0.30,<3",
     "asyncpg>=0.29.0,<1",
-    "alembic>=1.13.0,<2",
     # Validation
     "pydantic[email]>=2.8.0,<3",
     "pydantic-settings>=2.3.0,<3",

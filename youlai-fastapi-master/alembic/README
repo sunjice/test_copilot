@@ -1,0 +1,33 @@
+# Alembic 迁移
+
+## 双轨策略
+
+| 时机 | 用什么 |
+|---|---|
+| **首次在新服务器建库（生产初始化）** | `sql/postgresql/youlai-admin.sql` + `sql/postgresql/youlai-aitc.sql`，然后 `alembic stamp 11eff7563164` |
+| **后续开发期间** | 改 ORM → `alembic revision --autogenerate -m "..."` → `alembic upgrade head`（本地验证） |
+| **后续部署到已有库** | 仅 `alembic upgrade head` |
+
+## 当前基线
+
+基线 revision = **`11eff7563164_baseline`**
+（真实库 `alembic_version` 已等于 `11eff7563164`，内容为空迁移——SQL 已建好库结构）
+
+## 常用命令
+
+```bash
+# 查看当前 head
+alembic current
+
+# 查看待执行迁移
+alembic history --indicate-current
+
+# 升级到最新
+alembic upgrade head
+
+# 强制 baseline（首次上线后用一次）
+alembic stamp 11eff7563164
+
+# 改完 ORM 生成迁移
+alembic revision --autogenerate -m "add xxx"
+```
