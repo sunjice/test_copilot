@@ -126,6 +126,12 @@ PERM_SPEC_CREATE = "aitc:spec:create"
 PERM_SPEC_UPDATE = "aitc:spec:update"
 PERM_SPEC_DELETE = "aitc:spec:delete"
 
+PERM_SYNONYM_LIST   = "aitc:retrieval:synonym:list"
+PERM_SYNONYM_CREATE = "aitc:retrieval:synonym:create"
+PERM_SYNONYM_UPDATE = "aitc:retrieval:synonym:update"
+PERM_SYNONYM_DELETE = "aitc:retrieval:synonym:delete"
+PERM_SYNONYM_SYNC   = "aitc:retrieval:synonym:sync"
+
 # ── 规范类型 ──
 
 class SpecType(str, Enum):

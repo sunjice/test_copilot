@@ -72,5 +72,44 @@ class Settings(BaseSettings):
     # ── 性能计时 ──
     TIMING_LOG_ENABLED: bool = True  # 控制 timing.log 是否启用
 
+    # ── Elasticsearch ──
+    ES_HOST: str = "http://localhost:9200"
+    ES_INDEX_CASE: str = "tc_cases"
+    ES_INDEX_BUG: str = "tc_bugs"
+
+    # ── Milvus ──
+    MILVUS_HOST: str = "localhost"
+    MILVUS_PORT: int = 19530
+    MILVUS_COLLECTION_CASE: str = "tc_cases"
+    MILVUS_COLLECTION_BUG: str = "tc_bugs"
+
+    # ── Embedding ──
+    # 提供方：local / ollama / openai / azure，内置 provider 见
+    # app/aitc/retrieval/common/embedding/（注册表模式，可扩展任意供应商）
+    # 切换 provider 时注意 EMBEDDING_DIM 需与对应模型输出维度一致（Milvus collection 建好后不可改维度）
+    EMBEDDING_PROVIDER: str = "local"
+    # 本地模型目录（相对项目根），也兼容 HuggingFace 模型名（如 BAAI/bge-large-zh-v1.5）
+    EMBEDDING_MODEL: str = "models/bge-large-zh-v1.5"
+    EMBEDDING_DIM: int = 1024
+    EMBEDDING_DEVICE: str = "cpu"  # cpu / cuda
+
+    # ── Ollama Embedding（EMBEDDING_PROVIDER=ollama 时生效） ──
+    OLLAMA_BASE_URL: str = "http://localhost:11434"
+    OLLAMA_EMBEDDING_MODEL: str = "bge-m3"  # 常用 bge-m3 / nomic-embed-text 等
+
+    # ── OpenAI 兼容 Embedding（EMBEDDING_PROVIDER=openai，OpenAI 官方/通义千问/DeepSeek 等） ──
+    # 通义千问（DashScope）示例：
+    #   OPENAI_EMBEDDING_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+    #   OPENAI_EMBEDDING_MODEL=text-embedding-v3
+    OPENAI_EMBEDDING_BASE_URL: str = ""
+    OPENAI_EMBEDDING_API_KEY: str = ""
+    OPENAI_EMBEDDING_MODEL: str = "text-embedding-v3"
+
+    # ── Azure OpenAI Embedding（EMBEDDING_PROVIDER=azure 时生效） ──
+    AZURE_OPENAI_API_KEY: str = ""
+    AZURE_OPENAI_ENDPOINT: str = "https://your-resource.openai.azure.com"
+    AZURE_OPENAI_API_VERSION: str = "2024-02-01"
+    AZURE_EMBEDDING_DEPLOYMENT: str = "text-embedding-3-small"
+
 
 settings = Settings()

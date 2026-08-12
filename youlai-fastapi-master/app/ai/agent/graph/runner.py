@@ -237,6 +237,10 @@ class AgentRunner:
                 final_metadata = {}
                 final_content = collected_content or ""
 
+            # 卡片消息附带 LLM 调工具前的流式文字，前端用于渲染/恢复打字机阶段的完整内容
+            if collected_card and collected_content:
+                final_metadata["stream_text"] = collected_content
+
             final_metadata.update({
                 "tool_names": tool_names,
                 "tool_calls": tool_call_count,

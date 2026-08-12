@@ -24,11 +24,11 @@
     <!-- AI 消息：通栏排版，无气泡底色 -->
     <template v-else>
       <div class="msg-content">
-        <!-- 时间线：思考/工具/文本按原始顺序统一走 TurnRenderer（与流式过程结构一致，避免重排） -->
-        <TurnRenderer v-if="msg.msg_type === 'text' && hasSegments" :segments="metadataSegments" />
+        <!-- 时间线：有 segments 时统一渲染（卡片消息也保留流式阶段的打字机文字） -->
+        <TurnRenderer v-if="hasSegments" :segments="metadataSegments" />
 
-        <!-- 文本（无 segments 时兜底展示） -->
-        <div v-else-if="msg.msg_type === 'text'" class="msg-text" v-html="renderedContent" />
+        <!-- 纯文本消息（无 segments 时兜底展示，有 segments 时由 TurnRenderer 渲染，隐藏避免重复） -->
+        <div v-if="msg.msg_type === 'text'" class="msg-text" v-html="renderedContent" v-show="!hasSegments" />
 
           <!-- 操作卡片（核心挑选/审核/脚本生成结果） -->
           <div v-else-if="msg.msg_type === 'action_card'" class="msg-card">
@@ -416,16 +416,23 @@ const renderedContent = computed(() => renderMarkdown(props.msg.content || ""))
 
 // ── Segments 区块模型（新消息格式） ──
 
-/** 是否有 segments 数据 */
-const hasSegments = computed(() => {
+/**
+ * 从 metadata 中取出 segments。
+ * 历史卡片消息（后端保存时无 segments）用 stream_text 恢复流式前置文字，
+ * 保证刷新后文字不丢。
+ */
+const metadataSegments = computed<Segment[]>(() => {
   const segs = props.msg.metadata_json?.segments
-  return Array.isArray(segs) && segs.length > 0
+  if (Array.isArray(segs) && segs.length > 0) return segs as Segment[]
+  const streamText = props.msg.metadata_json?.stream_text as string | undefined
+  if (streamText && props.msg.msg_type !== "text") {
+    return [{ type: "text", content: streamText }]
+  }
+  return []
 })
 
-/** 从 metadata 中取出 segments */
-const metadataSegments = computed<Segment[]>(() => {
-  return (props.msg.metadata_json?.segments as Segment[]) || []
-})
+/** 是否有 segments 数据 */
+const hasSegments = computed(() => metadataSegments.value.length > 0)
 
 /** 复制消息内容（文本 + 工具记录） */
 function copyContent() {

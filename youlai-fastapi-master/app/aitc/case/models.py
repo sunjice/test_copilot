@@ -113,6 +113,10 @@ class AiTcCase(Base, BaseIdMixin, TimestampMixin, SoftDeleteMixin):
     )
     sync_error: Mapped[str | None] = mapped_column(Text, comment="最近一次反写失败原因")
 
+    # ── 检索引擎追踪 ──
+    index_hash: Mapped[str | None] = mapped_column(String(64), comment="索引内容 SHA256，用于增量变更检测")
+    indexed_at: Mapped[datetime | None] = mapped_column(DateTime, comment="最近一次索引时间")
+
     suite: Mapped["AiTcSuite"] = relationship(back_populates="cases", lazy="selectin")
     project: Mapped["AiTcProject"] = relationship(lazy="selectin")
     scripts: Mapped[list["AiTcScript"]] = relationship(back_populates="case", lazy="selectin")

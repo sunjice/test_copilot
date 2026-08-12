@@ -21,5 +21,8 @@ coverage.xml
 # 文件上传本地测试产物（file.type=local 时写入）
 uploads/
 
+# 本地 Embedding 模型（约 1.3GB，不入库，部署时随目录拷贝）
+models/
+
 # Alembic
 app/alembic/versions/*.pyc

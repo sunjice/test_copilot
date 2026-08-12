@@ -310,8 +310,8 @@ export function useChat() {
       // SSE 流已结束，先关闭 streaming 占位符，再 push 真消息
       streaming.value = false
 
-      // 把 segments 序列化到 metadata（仅纯文本消息需要，卡片类消息不附加 segments）
-      if (assistantMsgType === "text" && segments.value.length) {
+      // 把 segments 序列化到 metadata（文字/卡片消息都保留，避免卡片消息丢失流式前置文字）
+      if (segments.value.length) {
         // 流已结束，给未结算的思考区块补上 durationMs
         const now = performance.now()
         const finalizedSegments = segments.value.map((s) => {
