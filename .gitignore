@@ -9,9 +9,12 @@ build/
 .venv/
 .uv/
 .env
+!.env
 .env.*.bak
 *.egg
 !.env.example
+.env.local
+.env.*.local
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/

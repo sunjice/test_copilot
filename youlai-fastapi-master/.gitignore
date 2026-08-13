@@ -6,6 +6,7 @@ build/
 .venv/
 .uv/
 .env
+!.env
 .env.local
 *.egg
 !.env.example
