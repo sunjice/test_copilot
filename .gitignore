@@ -23,6 +23,7 @@ uploads/
 
 # 临时测试脚本（防止调试文件带密钥提交）
 _*.py
+!**/__init__.py
 *_backup.py
 *_backup.json
 *_backup.sql
