@@ -21,6 +21,8 @@ DROP TABLE IF EXISTS ai_tc_specs CASCADE;
 DROP TABLE IF EXISTS ai_tc_projects CASCADE;
 DROP TABLE IF EXISTS ai_llm_logs CASCADE;
 DROP TABLE IF EXISTS ai_usage_logs CASCADE;
+DROP TABLE IF EXISTS ai_run_events CASCADE;
+DROP TABLE IF EXISTS ai_usage_daily CASCADE;
 DROP TABLE IF EXISTS chat_messages CASCADE;
 DROP TABLE IF EXISTS chat_sessions CASCADE;
 DROP TABLE IF EXISTS ai_tc_ai_configs CASCADE;
@@ -30,52 +32,90 @@ DROP TABLE IF EXISTS retrieval_synonyms CASCADE;
 -- 建表语句 (DDL)
 -- ----------------------------
 
--- ==================== ai_llm_logs ====================
-CREATE TABLE ai_llm_logs (
-    trace_id             varchar(128) NOT NULL DEFAULT '',
-    span_seq             integer NOT NULL DEFAULT 0,
-    attempt              integer NOT NULL DEFAULT 0,
-    module               varchar(50) NOT NULL DEFAULT 'chat',
-    action               varchar(80) NOT NULL DEFAULT '',
-    session_id           bigint,
-    task_id              bigint,
-    message_id           bigint,
-    model                varchar(100) NOT NULL DEFAULT '',
-    status               varchar(20) NOT NULL DEFAULT 'success',
-    error_msg            text,
-    messages             jsonb,
-    response_raw         text,
-    response_json        jsonb,
-    prompt_tokens        integer NOT NULL DEFAULT 0,
-    completion_tokens    integer NOT NULL DEFAULT 0,
-    duration_ms          integer NOT NULL DEFAULT 0,
-    create_time          timestamp NOT NULL DEFAULT now(),
-    id                   bigint PRIMARY KEY
+-- ==================== ai_run_events ====================
+CREATE TABLE ai_run_events (
+    id                        bigint PRIMARY KEY,
+    session_id                bigint,
+    message_id                bigint,
+    seq                       integer NOT NULL DEFAULT 0,
+    event_type                varchar(40) NOT NULL DEFAULT 'llm_call',
+    module                    varchar(50) NOT NULL DEFAULT 'chat',
+    action                    varchar(80) NOT NULL DEFAULT '',
+    tool_call_id              varchar(128),
+    provider                  varchar(50) NOT NULL DEFAULT '',
+    api_base                  varchar(255) NOT NULL DEFAULT '',
+    model                     varchar(100) NOT NULL DEFAULT '',
+    status                    varchar(20) NOT NULL DEFAULT 'success',
+    error_msg                 text,
+    request_messages          jsonb,
+    response_raw              text,
+    response_json             jsonb,
+    prompt_tokens             integer NOT NULL DEFAULT 0,
+    prompt_cache_hit_tokens   integer NOT NULL DEFAULT 0,
+    prompt_cache_miss_tokens  integer NOT NULL DEFAULT 0,
+    prompt_cache_write_tokens integer NOT NULL DEFAULT 0,
+    completion_tokens         integer NOT NULL DEFAULT 0,
+    reasoning_tokens          integer NOT NULL DEFAULT 0,
+    duration_ms               integer NOT NULL DEFAULT 0,
+    create_time               timestamp NOT NULL DEFAULT now()
 );
-CREATE INDEX idx_llm_log_session ON ai_llm_logs (session_id, create_time);
-CREATE INDEX idx_llm_log_trace ON ai_llm_logs (trace_id);
-CREATE INDEX idx_llm_log_status ON ai_llm_logs (status, create_time);
-CREATE INDEX idx_llm_log_action ON ai_llm_logs (action);
-COMMENT ON TABLE ai_llm_logs IS 'AI LLM 调用日志表';
-COMMENT ON COLUMN ai_llm_logs.id IS '主键ID';
-COMMENT ON COLUMN ai_llm_logs.trace_id IS '调用链 ID，同一用户动作的多次 LLM 调用共享';
-COMMENT ON COLUMN ai_llm_logs.span_seq IS '调用链内序号，从 0 开始';
-COMMENT ON COLUMN ai_llm_logs.attempt IS '重试次数';
-COMMENT ON COLUMN ai_llm_logs.module IS '来源模块 chat/task_engine';
-COMMENT ON COLUMN ai_llm_logs.action IS '动作名称 intent_recognize/case_review/script_gen 等';
-COMMENT ON COLUMN ai_llm_logs.session_id IS '关联会话ID（chat 模块）';
-COMMENT ON COLUMN ai_llm_logs.task_id IS '关联任务ID（task_engine 模块）';
-COMMENT ON COLUMN ai_llm_logs.message_id IS '关联消息ID（chat 模块）';
-COMMENT ON COLUMN ai_llm_logs.model IS '模型名称';
-COMMENT ON COLUMN ai_llm_logs.status IS '调用状态 success/error/timeout';
-COMMENT ON COLUMN ai_llm_logs.error_msg IS '错误信息';
-COMMENT ON COLUMN ai_llm_logs.messages IS '请求 messages 完整 JSON';
-COMMENT ON COLUMN ai_llm_logs.response_raw IS 'LLM 原始返回文本';
-COMMENT ON COLUMN ai_llm_logs.response_json IS 'LLM 结构化返回（JSON parse 后）';
-COMMENT ON COLUMN ai_llm_logs.prompt_tokens IS '输入 token';
-COMMENT ON COLUMN ai_llm_logs.completion_tokens IS '输出 token';
-COMMENT ON COLUMN ai_llm_logs.duration_ms IS '耗时(毫秒)';
-COMMENT ON COLUMN ai_llm_logs.create_time IS '创建时间';
+CREATE INDEX idx_run_events_message ON ai_run_events (message_id, seq);
+CREATE INDEX idx_run_events_session ON ai_run_events (session_id, create_time);
+CREATE INDEX idx_run_events_time ON ai_run_events (create_time);
+CREATE INDEX idx_run_events_model ON ai_run_events (provider, model);
+COMMENT ON TABLE ai_run_events IS 'AI 运行事件（平铺轨迹 + 用量）';
+COMMENT ON COLUMN ai_run_events.id IS '主键ID';
+COMMENT ON COLUMN ai_run_events.session_id IS '关联会话ID（一个对话界面）';
+COMMENT ON COLUMN ai_run_events.message_id IS '关联消息ID（一轮问答）';
+COMMENT ON COLUMN ai_run_events.seq IS '轮内单调递增序号';
+COMMENT ON COLUMN ai_run_events.event_type IS '事件类型 turn_start/user_message/llm_call/tool_call/tool_result/assistant_message/turn_end';
+COMMENT ON COLUMN ai_run_events.module IS '来源模块 chat/task_engine/agent';
+COMMENT ON COLUMN ai_run_events.action IS '动作名称';
+COMMENT ON COLUMN ai_run_events.tool_call_id IS '工具调用 ID（关联 tool_call 与 tool_result）';
+COMMENT ON COLUMN ai_run_events.provider IS '供应商 deepseek/openai/local';
+COMMENT ON COLUMN ai_run_events.api_base IS '接口地址 base_url';
+COMMENT ON COLUMN ai_run_events.model IS '模型名称';
+COMMENT ON COLUMN ai_run_events.status IS '调用状态 success/error/timeout';
+COMMENT ON COLUMN ai_run_events.error_msg IS '错误信息';
+COMMENT ON COLUMN ai_run_events.request_messages IS '请求 messages 完整 JSON';
+COMMENT ON COLUMN ai_run_events.response_raw IS 'LLM 原始返回文本';
+COMMENT ON COLUMN ai_run_events.response_json IS 'LLM 结构化返回（JSON parse 后）';
+COMMENT ON COLUMN ai_run_events.prompt_tokens IS '输入 token 总数';
+COMMENT ON COLUMN ai_run_events.prompt_cache_hit_tokens IS '缓存命中 token';
+COMMENT ON COLUMN ai_run_events.prompt_cache_miss_tokens IS '缓存未命中 token';
+COMMENT ON COLUMN ai_run_events.prompt_cache_write_tokens IS '缓存写入 token';
+COMMENT ON COLUMN ai_run_events.completion_tokens IS '输出 token 总数';
+COMMENT ON COLUMN ai_run_events.reasoning_tokens IS '思考过程 token（reasoner 模型）';
+COMMENT ON COLUMN ai_run_events.duration_ms IS '耗时(毫秒)';
+COMMENT ON COLUMN ai_run_events.create_time IS '创建时间';
+
+-- ==================== ai_usage_daily ====================
+CREATE TABLE ai_usage_daily (
+    id                        bigint PRIMARY KEY,
+    stat_date                 date NOT NULL,
+    provider                  varchar(50) NOT NULL DEFAULT '',
+    model                     varchar(100) NOT NULL DEFAULT '',
+    api_base                  varchar(255) NOT NULL DEFAULT '',
+    request_count             integer NOT NULL DEFAULT 0,
+    prompt_tokens             integer NOT NULL DEFAULT 0,
+    prompt_cache_hit_tokens   integer NOT NULL DEFAULT 0,
+    prompt_cache_miss_tokens  integer NOT NULL DEFAULT 0,
+    prompt_cache_write_tokens integer NOT NULL DEFAULT 0,
+    completion_tokens         integer NOT NULL DEFAULT 0,
+    reasoning_tokens          integer NOT NULL DEFAULT 0,
+    cost_cny                  numeric(14,6) NOT NULL DEFAULT 0,
+    create_time               timestamp NOT NULL DEFAULT now(),
+    CONSTRAINT uq_usage_daily_key UNIQUE (stat_date, provider, model, api_base)
+);
+CREATE INDEX idx_usage_daily_date ON ai_usage_daily (stat_date);
+COMMENT ON TABLE ai_usage_daily IS 'AI 按日用量汇总表';
+COMMENT ON COLUMN ai_usage_daily.id IS '主键ID';
+COMMENT ON COLUMN ai_usage_daily.stat_date IS '统计日期';
+COMMENT ON COLUMN ai_usage_daily.provider IS '供应商';
+COMMENT ON COLUMN ai_usage_daily.model IS '模型名称';
+COMMENT ON COLUMN ai_usage_daily.api_base IS '接口地址 base_url';
+COMMENT ON COLUMN ai_usage_daily.request_count IS '调用次数';
+COMMENT ON COLUMN ai_usage_daily.cost_cny IS '费用（人民币）';
 
 -- ==================== ai_tc_ai_configs ====================
 CREATE TABLE ai_tc_ai_configs (
@@ -548,33 +588,6 @@ COMMENT ON COLUMN chat_drafts.confirmed_by IS '确认人';
 COMMENT ON COLUMN chat_drafts.confirmed_at IS '确认时间';
 COMMENT ON COLUMN chat_drafts.create_time IS '创建时间';
 COMMENT ON COLUMN chat_drafts.update_time IS '更新时间';
-
--- ==================== ai_usage_logs ====================
-CREATE TABLE ai_usage_logs (
-    module               varchar(50) NOT NULL DEFAULT 'chat',
-    session_id           bigint,
-    task_id              bigint,
-    model                varchar(100) NOT NULL,
-    prompt_tokens        integer NOT NULL DEFAULT 0,
-    completion_tokens    integer NOT NULL DEFAULT 0,
-    total_tokens         integer NOT NULL DEFAULT 0,
-    duration_ms          integer NOT NULL DEFAULT 0,
-    created_at           varchar(32) NOT NULL,
-    id                   bigint PRIMARY KEY
-);
-CREATE INDEX idx_usage_module ON ai_usage_logs (module, created_at);
-CREATE INDEX idx_usage_session ON ai_usage_logs (session_id);
-COMMENT ON TABLE ai_usage_logs IS 'AI Token 用量统计表';
-COMMENT ON COLUMN ai_usage_logs.id IS '主键ID';
-COMMENT ON COLUMN ai_usage_logs.module IS '来源模块 chat/task_engine';
-COMMENT ON COLUMN ai_usage_logs.session_id IS '会话ID（chat 模块）';
-COMMENT ON COLUMN ai_usage_logs.task_id IS '任务ID（task_engine 模块）';
-COMMENT ON COLUMN ai_usage_logs.model IS '模型名称';
-COMMENT ON COLUMN ai_usage_logs.prompt_tokens IS '输入 token';
-COMMENT ON COLUMN ai_usage_logs.completion_tokens IS '输出 token';
-COMMENT ON COLUMN ai_usage_logs.total_tokens IS '总 token';
-COMMENT ON COLUMN ai_usage_logs.duration_ms IS '耗时(毫秒)';
-COMMENT ON COLUMN ai_usage_logs.created_at IS '创建时间';
 
 -- ==================== retrieval_synonyms ====================
 -- 代码通过 SynonymsManager 原生 SQL 操作此表

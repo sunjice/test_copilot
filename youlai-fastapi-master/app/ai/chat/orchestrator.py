@@ -23,7 +23,7 @@ from app.ai.chat.intent_router import intent_router
 from app.ai.chat.session_manager import SessionContext
 from app.ai.chat.usage_logger import LangChainTokenCallback, TokenMeter
 from app.ai.config import ai_settings
-from app.ai.llm_log.writer import LlmLogWriter, make_trace_id
+from app.ai.llm_log.writer import LlmLogWriter
 
 
 # ── prompt 模板缓存在模块级（只读一次磁盘） ──
@@ -182,7 +182,6 @@ class FreeformStrategy(ChatStrategy):
             return
 
         meter = TokenMeter(model=ai_config.model or "unknown")
-        trace_id = context.get_working("trace_id") or make_trace_id("chat", context.session_id)
         t_start = time.time()
 
         messages_raw: list[dict] = []
@@ -214,15 +213,17 @@ class FreeformStrategy(ChatStrategy):
 
             duration_ms = int((time.time() - t_start) * 1000)
             await LlmLogWriter.write(
-                trace_id=trace_id,
-                span_seq=0,
-                attempt=0,
+                session_id=context.session_id,
+                message_id=context.get_working("message_id"),
+                seq=0,
+                event_type="llm_call",
                 module="chat",
                 action="freeform_chat",
-                session_id=context.session_id,
+                provider=ai_config.provider,
+                api_base=ai_config.api_base,
                 model=ai_config.model or "unknown",
                 status="success",
-                messages=messages_raw,
+                request_messages=messages_raw,
                 response_raw=full_text,
                 prompt_tokens=meter.prompt_tokens,
                 completion_tokens=meter.completion_tokens,
@@ -247,16 +248,18 @@ class FreeformStrategy(ChatStrategy):
         except Exception as e:
             duration_ms = int((time.time() - t_start) * 1000)
             await LlmLogWriter.write(
-                trace_id=trace_id,
-                span_seq=0,
-                attempt=0,
+                session_id=context.session_id,
+                message_id=context.get_working("message_id"),
+                seq=0,
+                event_type="llm_call",
                 module="chat",
                 action="freeform_chat",
-                session_id=context.session_id,
+                provider=ai_config.provider if ai_config else "unknown",
+                api_base=ai_config.api_base if ai_config else "",
                 model=ai_config.model if ai_config else "unknown",
                 status="error",
                 error_msg=str(e)[:500],
-                messages=messages_raw if messages_raw else None,
+                request_messages=messages_raw if messages_raw else None,
                 prompt_tokens=meter.prompt_tokens,
                 completion_tokens=meter.completion_tokens,
                 duration_ms=duration_ms,

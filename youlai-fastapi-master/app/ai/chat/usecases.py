@@ -4,11 +4,10 @@ from typing import Any, AsyncGenerator
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.ai.chat.service import SessionService, MessageService, UsageLogService
+from app.ai.chat.service import SessionService, MessageService
 from app.ai.chat.session_manager import SessionContext
 from app.ai.chat.orchestrator import chat_orchestrator
 from app.ai.config import resolve_ai_config
-from app.ai.llm_log.writer import make_trace_id
 from app.ai.chat.schemas import (
     SessionCreate, SessionUpdate, SessionVO,
     MessageSendReq, MessageVO,
@@ -21,7 +20,6 @@ class ChatUseCase:
         self.db = db
         self.session = SessionService(db)
         self.message = MessageService(db)
-        self.usage = UsageLogService(db)
 
     async def create_session(self, req: SessionCreate, user_id: int | None = None) -> SessionVO:
         return await self.session.create_session(req, user_id=user_id)
@@ -81,8 +79,8 @@ class ChatUseCase:
         # 1. 获取历史消息（必须在保存当前用户消息之前，避免 history 中包含当前消息）
         history = await self.message.get_message_history(session_id, limit=29, user_id=owner_id)
 
-        # 2. 保存用户消息
-        await self.message.add_message(session_id, "user", req.content)
+        # 2. 保存用户消息，拿到本轮 message_id 供 LLM 日志关联
+        user_msg = await self.message.add_message(session_id, "user", req.content)
         context = SessionContext(
             session_id=session_id,
             domain=session.domain,
@@ -95,8 +93,7 @@ class ChatUseCase:
         # 4. 注入上下文
         context.working["db_session"] = self.db
         context.working["ai_config"] = ai_config
-        trace_id = make_trace_id("chat", session_id)
-        context.working["trace_id"] = trace_id
+        context.working["message_id"] = user_msg.id
 
         # 单一事实来源：后端只产出一条 message 事件（parts 内嵌卡片），
         # 这里收集单条 message 并持久化一次。
@@ -139,17 +136,5 @@ class ChatUseCase:
                 metadata={"error": str(e)},
             )
             yield f"event: error\ndata: {json.dumps({'message': str(e)}, ensure_ascii=False)}\n\n"
-
-        last_meta = assistant_meta
-        tokens = last_meta.get("tokens", {})
-        if tokens:
-            await self.usage.log_usage(
-                module="chat",
-                model=ai_config.model if ai_config else "unknown",
-                prompt_tokens=tokens.get("prompt", 0),
-                completion_tokens=tokens.get("completion", 0),
-                duration_ms=last_meta.get("duration_ms", 0),
-                session_id=session_id,
-            )
 
         yield "event: done\ndata: {}\n\n"

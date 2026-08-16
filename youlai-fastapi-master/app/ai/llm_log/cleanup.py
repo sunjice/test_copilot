@@ -1,4 +1,4 @@
-"""LLM 日志定时清理 — 每天凌晨 3:00 删除过期日志，分批删除避免长锁。"""
+"""AI 运行事件定时清理 — 每天凌晨 3:00 删除过期事件，分批删除避免长锁。"""
 
 import asyncio
 from datetime import datetime, timedelta
@@ -9,7 +9,7 @@ from sqlalchemy import delete, select
 from app.config import settings
 from app.database import AsyncSessionLocal
 from app.redis import get_redis
-from app.ai.llm_log.models import AiLlmLog
+from app.ai.llm_log.models import AiRunEvent
 
 # ═══════════════════ 清理配置 ═══════════════════
 
@@ -108,14 +108,14 @@ class LlmLogCleanup:
             while True:
                 # 子查询选出即将删除的 ID（避免 DELETE ... LIMIT 在不同 DB 的兼容问题）
                 subq = (
-                    select(AiLlmLog.id)
-                    .where(AiLlmLog.create_time < cutoff)
-                    .order_by(AiLlmLog.id)
+                    select(AiRunEvent.id)
+                    .where(AiRunEvent.create_time < cutoff)
+                    .order_by(AiRunEvent.id)
                     .limit(BATCH_SIZE)
                 )
 
                 result = await db.execute(
-                    delete(AiLlmLog).where(AiLlmLog.id.in_(subq))
+                    delete(AiRunEvent).where(AiRunEvent.id.in_(subq))
                 )
                 await db.commit()
 

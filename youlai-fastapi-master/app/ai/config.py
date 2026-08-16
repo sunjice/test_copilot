@@ -53,6 +53,23 @@ class AiConfigSnapshot:
     max_tokens: int
     id: int | None = None  # 保留字段，兼容旧代码
 
+    @property
+    def provider(self) -> str:
+        """从 api_base 推断供应商，用于费用统计与日志区分。"""
+        return infer_provider(self.api_base)
+
+
+def infer_provider(api_base: str) -> str:
+    """从接口地址推断供应商标识：deepseek / openai / local / unknown。"""
+    base = (api_base or "").lower()
+    if "deepseek" in base:
+        return "deepseek"
+    if "openai" in base:
+        return "openai"
+    if "localhost" in base or "127.0.0.1" in base or "ollama" in base:
+        return "local"
+    return "unknown"
+
 
 def resolve_ai_config(scene: str = "chat") -> AiConfigSnapshot:
     """解析 AI 配置：统一从 .env 读取（不再查询 DB aiconfig 表）。

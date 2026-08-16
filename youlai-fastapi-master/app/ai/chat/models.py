@@ -56,31 +56,3 @@ class ChatMessage(Base, BaseIdMixin, TimestampMixin):
     __table_args__ = (
         Index("idx_chat_msg_session", "session_id", "id"),
     )
-
-
-class AiUsageLog(Base, BaseIdMixin):
-    """AI Token 用量统计。"""
-    __tablename__ = "ai_usage_logs"
-
-    module: Mapped[str] = mapped_column(
-        String(50), default="chat", server_default="'chat'", comment="来源模块 chat/task_engine"
-    )
-    session_id: Mapped[int | None] = mapped_column(
-        BigInteger, comment="会话ID（chat 模块）"
-    )
-    task_id: Mapped[int | None] = mapped_column(
-        BigInteger, comment="任务ID（task_engine 模块）"
-    )
-    model: Mapped[str] = mapped_column(String(100), nullable=False, comment="模型名称")
-    prompt_tokens: Mapped[int] = mapped_column(Integer, default=0, server_default="0", comment="输入 token")
-    completion_tokens: Mapped[int] = mapped_column(Integer, default=0, server_default="0", comment="输出 token")
-    total_tokens: Mapped[int] = mapped_column(Integer, default=0, server_default="0", comment="总 token")
-    duration_ms: Mapped[int] = mapped_column(Integer, default=0, server_default="0", comment="耗时(毫秒)")
-    created_at: Mapped[str] = mapped_column(
-        String(32), default=func.now(), comment="创建时间"
-    )
-
-    __table_args__ = (
-        Index("idx_usage_module", "module", "created_at"),
-        Index("idx_usage_session", "session_id"),
-    )

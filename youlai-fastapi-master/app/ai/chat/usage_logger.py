@@ -1,12 +1,8 @@
-"""Token 用量记录器 — LangChain Callback + 通用日志。"""
+"""Token 用量记录器 — LangChain Callback。"""
 
 import time
-from typing import Any
 
 from langchain_core.callbacks import BaseCallbackHandler
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from app.ai.chat.models import AiUsageLog
 
 
 class TokenMeter:
@@ -16,7 +12,6 @@ class TokenMeter:
         meter = TokenMeter(model="gpt-4")
         # ... LLM 调用 ...
         meter.capture(prompt_tokens=150, completion_tokens=80)
-        await meter.save(db, module="chat", session_id=1)
     """
 
     def __init__(self, model: str = "unknown"):
@@ -41,29 +36,6 @@ class TokenMeter:
         """累加 token 计数（支持多次调用累积）。"""
         self.prompt_tokens += prompt_tokens
         self.completion_tokens += completion_tokens
-
-    async def save(
-        self,
-        db: AsyncSession,
-        module: str = "chat",
-        session_id: int | None = None,
-        task_id: int | None = None,
-    ):
-        """将用量记录写入数据库。"""
-        if self.total_tokens == 0:
-            return
-        log = AiUsageLog(
-            module=module,
-            session_id=session_id,
-            task_id=task_id,
-            model=self.model,
-            prompt_tokens=self.prompt_tokens,
-            completion_tokens=self.completion_tokens,
-            total_tokens=self.total_tokens,
-            duration_ms=self.duration_ms,
-        )
-        db.add(log)
-        await db.flush()
 
 
 class LangChainTokenCallback(BaseCallbackHandler):

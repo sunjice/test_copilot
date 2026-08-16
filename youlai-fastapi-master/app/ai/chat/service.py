@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
 from app.exceptions import BusinessException
-from app.ai.chat.models import ChatSession, ChatMessage, AiUsageLog
+from app.ai.chat.models import ChatSession, ChatMessage
 from app.ai.chat.schemas import (
     SessionCreate, SessionUpdate, SessionVO,
     MessageVO, ContextSetReq,
@@ -263,36 +263,6 @@ class MessageService:
         )
 
 
-class UsageLogService:
-    """AI 用量日志服务。"""
-
-    def __init__(self, db: AsyncSession):
-        self.db = db
-
-    async def log_usage(
-        self,
-        module: str,
-        model: str,
-        prompt_tokens: int,
-        completion_tokens: int,
-        duration_ms: int,
-        session_id: int | None = None,
-        task_id: int | None = None,
-    ):
-        log = AiUsageLog(
-            module=module,
-            session_id=session_id,
-            task_id=task_id,
-            model=model,
-            prompt_tokens=prompt_tokens,
-            completion_tokens=completion_tokens,
-            total_tokens=prompt_tokens + completion_tokens,
-            duration_ms=duration_ms,
-        )
-        self.db.add(log)
-        await self.db.flush()
-
-
 class ChatService:
     """旧 ChatService 封装，兼容现有调用。"""
 
@@ -300,7 +270,6 @@ class ChatService:
         self.db = db
         self.session = SessionService(db)
         self.message = MessageService(db)
-        self.usage = UsageLogService(db)
 
     async def create_session(self, req: SessionCreate, user_id: int | None = None) -> SessionVO:
         return await self.session.create_session(req, user_id=user_id)
@@ -341,23 +310,3 @@ class ChatService:
 
     async def update_last_card_metadata_by_type(self, session_id: int, msg_type: str, metadata: dict) -> None:
         return await self.message.update_last_card_metadata_by_type(session_id, msg_type, metadata)
-
-    async def log_usage(
-        self,
-        module: str,
-        model: str,
-        prompt_tokens: int,
-        completion_tokens: int,
-        duration_ms: int,
-        session_id: int | None = None,
-        task_id: int | None = None,
-    ):
-        return await self.usage.log_usage(
-            module=module,
-            model=model,
-            prompt_tokens=prompt_tokens,
-            completion_tokens=completion_tokens,
-            duration_ms=duration_ms,
-            session_id=session_id,
-            task_id=task_id,
-        )

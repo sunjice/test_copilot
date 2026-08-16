@@ -84,12 +84,13 @@ async def execute_task_bg(task_id: int, task_type: str):
 
             # 初始化 AI 客户端
             client = AiClient(ai_config)
-            # 设置日志上下文，每次 LLM 调用自动写入 ai_llm_logs
+            # 设置日志上下文，每次 LLM 调用自动写入 ai_run_events
             client.set_log_context(
                 action=task_type,
                 module="task_engine",
                 task_id=task_id,
                 session_id=task.session_id,
+                provider=ai_config.provider,
             )
 
             # 构建上下文

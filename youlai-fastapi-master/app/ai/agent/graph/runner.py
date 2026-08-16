@@ -31,7 +31,7 @@ from app.ai.agent.graph.state import AgentState
 from app.ai.chat.session_manager import SessionContext
 from app.ai.chat.usage_logger import LangChainTokenCallback, TokenMeter
 from app.ai.config import AiConfigSnapshot
-from app.ai.llm_log.writer import LlmLogWriter, make_trace_id
+from app.ai.llm_log.writer import LlmLogWriter
 
 # ── 生产韧性配置 ──
 RECURSION_LIMIT = 25          # 图级递归限制（替代 runner 内手动计数）
@@ -92,7 +92,7 @@ class AgentRunner:
         graph_config["callbacks"] = [token_callback]
 
         # ── LLM 日志 ──
-        trace_id = context.get_working("trace_id") or make_trace_id("agent", context.session_id)
+        message_id = context.get_working("message_id")
         t_start = time.time()
 
         # ── 立即发送 thinking 事件，让前端知道 agent 已开始工作 ──
@@ -169,14 +169,14 @@ class AgentRunner:
                     ttft_str = f"ttft={ttft}ms" if ttft is not None else "ttft=N/A"
                     logger.debug(f"[AgentRunner] LLM Round {span_seq} 响应完成 耗时={round_dt}ms {ttft_str} output_tokens={output_tokens_str}")
                     logger.info(
-                        f"[agent_llm_round] trace={trace_id} span={span_seq} "
+                        f"[agent_llm_round] message_id={message_id} seq={span_seq} "
                         f"msgs={len(round_msgs)} output_type={type(output).__name__} "
                         f"usage={getattr(output, 'usage_metadata', None)}"
                     )
                     round_tasks.append(asyncio.create_task(self._write_round_log(
-                        trace_id=trace_id,
-                        span_seq=span_seq,
                         session_id=context.session_id,
+                        message_id=message_id,
+                        seq=span_seq,
                         ai_config=ai_config,
                         messages=round_msgs,
                         output=output,
@@ -259,7 +259,7 @@ class AgentRunner:
                     duration_ms = int((time.time() - t_start) * 1000)
                     msg = event.get("data", {}).get("message", "Agent 执行超时")
                     await self._write_log(
-                        trace_id, context.session_id, ai_config, "timeout", msg, None,
+                        context.session_id, message_id, ai_config, "timeout", msg, None,
                         duration_ms, meter.prompt_tokens, meter.completion_tokens,
                     )
                     await _flush_round_logs()
@@ -270,7 +270,7 @@ class AgentRunner:
         except Exception as e:
             duration_ms = int((time.time() - t_start) * 1000)
             await self._write_log(
-                trace_id, context.session_id, ai_config, "error", str(e), None,
+                context.session_id, message_id, ai_config, "error", str(e), None,
                 duration_ms, meter.prompt_tokens, meter.completion_tokens,
             )
             await _flush_round_logs()
@@ -315,7 +315,7 @@ class AgentRunner:
 
         # ── 异步写日志（不阻塞 SSE 流） ──
         await self._write_log(
-            trace_id, context.session_id, ai_config, "success", None, collected_content,
+            context.session_id, message_id, ai_config, "success", None, collected_content,
             duration_ms, meter.prompt_tokens, meter.completion_tokens,
         )
         await _flush_round_logs()
@@ -439,8 +439,8 @@ class AgentRunner:
 
     @staticmethod
     async def _write_log(
-        trace_id: str,
         session_id: int,
+        message_id: int | None,
         ai_config: AiConfigSnapshot,
         status: str,
         error_msg: str | None,
@@ -452,16 +452,18 @@ class AgentRunner:
         """写入 LLM 调用日志（agent 模式含 token 统计）。"""
         try:
             await LlmLogWriter.write(
-                trace_id=trace_id,
-                span_seq=0,
-                attempt=0,
+                session_id=session_id,
+                message_id=message_id,
+                seq=0,
+                event_type="llm_call",
                 module="agent",
                 action="agent_run",
-                session_id=session_id,
-                model=ai_config.model or "unknown",
+                provider=ai_config.provider if ai_config else "unknown",
+                api_base=ai_config.api_base if ai_config else "",
+                model=ai_config.model if ai_config else "unknown",
                 status=status,
                 error_msg=error_msg,
-                messages=[],
+                request_messages=[],
                 response_raw=response_text or "",
                 prompt_tokens=prompt_tokens,
                 completion_tokens=completion_tokens,
@@ -473,15 +475,15 @@ class AgentRunner:
     @staticmethod
     async def _write_round_log(
         *,
-        trace_id: str,
-        span_seq: int,
         session_id: int,
+        message_id: int | None,
+        seq: int,
         ai_config: AiConfigSnapshot,
         messages: list[dict],
         output: Any,
         duration_ms: int,
     ) -> None:
-        """写入单轮 LLM 调用日志（ReAct 每轮一条，同 trace_id + span_seq 递增串联）。
+        """写入单轮 LLM 调用日志（ReAct 每轮一条，同 message_id + seq 递增串联）。
 
         messages 为本轮发给 LLM 的完整消息（含 system prompt、历史、此前工具结果），
         output 为本轮模型输出（content + tool_calls + usage_metadata）。
@@ -500,15 +502,17 @@ class AgentRunner:
                 content = str(output)
 
             await LlmLogWriter.write(
-                trace_id=trace_id,
-                span_seq=span_seq,
-                attempt=0,
+                session_id=session_id,
+                message_id=message_id,
+                seq=seq,
+                event_type="llm_call",
                 module="agent",
                 action="agent_llm_round",
-                session_id=session_id,
-                model=ai_config.model or "unknown",
+                provider=ai_config.provider if ai_config else "unknown",
+                api_base=ai_config.api_base if ai_config else "",
+                model=ai_config.model if ai_config else "unknown",
                 status="success",
-                messages=messages,
+                request_messages=messages,
                 response_raw=content,
                 response_json={"tool_calls": tool_calls} if tool_calls else None,
                 prompt_tokens=usage.get("input_tokens", 0),
@@ -516,7 +520,7 @@ class AgentRunner:
                 duration_ms=duration_ms,
             )
         except Exception as e:
-            logger.warning(f"[agent_llm_round] write failed: trace={trace_id} span={span_seq} err={e}")
+            logger.warning(f"[agent_llm_round] write failed: session={session_id} seq={seq} err={e}")
 
     @staticmethod
     def _sse(event: str, data: dict) -> str:

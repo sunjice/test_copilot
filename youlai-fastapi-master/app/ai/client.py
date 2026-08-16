@@ -12,7 +12,7 @@ from typing import Any
 from loguru import logger
 from openai import AsyncOpenAI
 
-from app.ai.llm_log.writer import LlmLogWriter, make_trace_id
+from app.ai.llm_log.writer import LlmLogWriter
 
 
 class AiClient:
@@ -53,12 +53,13 @@ class AiClient:
         self.output_tokens = 0
 
         # ── 日志上下文（由调用方 set_log_context 设置）──
-        self._log_trace_id: str = ""
         self._log_action: str = ""
         self._log_module: str = "task_engine"
         self._log_session_id: int | None = None
         self._log_task_id: int | None = None
-        self._log_span_seq: int = 0
+        self._log_message_id: int | None = None
+        self._log_provider: str = ""
+        self._log_seq: int = 0
 
     def set_log_context(
         self,
@@ -67,15 +68,17 @@ class AiClient:
         module: str = "task_engine",
         session_id: int | None = None,
         task_id: int | None = None,
-        trace_id: str | None = None,
+        message_id: int | None = None,
+        provider: str = "",
     ):
-        """设置 LLM 调用日志上下文。每次 chat_json 调用自动写入 ai_llm_logs。"""
+        """设置 LLM 调用日志上下文。每次 chat_json 调用自动写入 ai_run_events。"""
         self._log_action = action
         self._log_module = module
         self._log_session_id = session_id
         self._log_task_id = task_id
-        self._log_trace_id = trace_id or make_trace_id("task", action, task_id or session_id)
-        self._log_span_seq = 0
+        self._log_message_id = message_id
+        self._log_provider = provider
+        self._log_seq = 0
 
     # ── 底层调用 ──
 
@@ -88,7 +91,7 @@ class AiClient:
         retry: int = 1,
     ) -> dict | list:
         """发送 Chat Completion 请求，返回解析后的 JSON（优先 JSON Mode，失败则正则兜底解析 + 重试）。
-        每次调用自动写入 ai_llm_logs 审计日志。
+        每次调用自动写入 ai_run_events 审计日志。
         """
         messages = [
             {"role": "system", "content": system_prompt},
@@ -97,8 +100,8 @@ class AiClient:
 
         temp = temperature if temperature is not None else self.temperature
         max_tok = max_tokens if max_tokens is not None else self.max_tokens
-        span_seq = self._log_span_seq
-        self._log_span_seq += 1
+        seq = self._log_seq
+        self._log_seq += 1
 
         for attempt in range(retry + 1):
             t_start = time.time()
@@ -124,8 +127,15 @@ class AiClient:
                 text = resp.choices[0].message.content or ""
                 parsed = self._extract_json(text)
                 duration_ms = int((time.time() - t_start) * 1000)
-                prompt_tok = resp.usage.prompt_tokens if resp.usage else 0
-                completion_tok = resp.usage.completion_tokens if resp.usage else 0
+                usage = resp.usage
+                prompt_tok = usage.prompt_tokens if usage else 0
+                completion_tok = usage.completion_tokens if usage else 0
+                cache_hit = self._usage_getattr(usage, "prompt_cache_hit_tokens")
+                cache_miss = self._usage_getattr(usage, "prompt_cache_miss_tokens")
+                cache_write = self._usage_getattr(usage, "prompt_cache_write_tokens")
+                reasoning = self._usage_getattr(
+                    getattr(usage, "completion_tokens_details", None), "reasoning_tokens"
+                )
 
                 if parsed is not None:
                     self.input_tokens += prompt_tok
@@ -134,11 +144,15 @@ class AiClient:
 
                     # ── 写入成功日志 ──
                     await self._write_log(
-                        span_seq=span_seq, attempt=attempt,
+                        seq=seq, attempt=attempt,
                         messages=messages, response_raw=text,
                         response_json=parsed,
                         prompt_tokens=prompt_tok,
+                        prompt_cache_hit_tokens=cache_hit,
+                        prompt_cache_miss_tokens=cache_miss,
+                        prompt_cache_write_tokens=cache_write,
                         completion_tokens=completion_tok,
+                        reasoning_tokens=reasoning,
                         duration_ms=duration_ms,
                         status="success",
                     )
@@ -151,10 +165,14 @@ class AiClient:
                     logger.error(f"JSON parse failed after {retry + 1} attempts. Raw: {text[:500]}")
                     # ── 写入失败日志（解析失败）──
                     await self._write_log(
-                        span_seq=span_seq, attempt=attempt,
+                        seq=seq, attempt=attempt,
                         messages=messages, response_raw=text,
                         prompt_tokens=prompt_tok,
+                        prompt_cache_hit_tokens=cache_hit,
+                        prompt_cache_miss_tokens=cache_miss,
+                        prompt_cache_write_tokens=cache_write,
                         completion_tokens=completion_tok,
+                        reasoning_tokens=reasoning,
                         duration_ms=duration_ms,
                         status="error",
                         error_msg=f"JSON解析失败，原始返回: {text[:200]}",
@@ -164,7 +182,7 @@ class AiClient:
                 duration_ms = int((time.time() - t_start) * 1000)
                 logger.error(f"AI API call error (attempt {attempt + 1}): {e}")
                 await self._write_log(
-                    span_seq=span_seq, attempt=attempt,
+                    seq=seq, attempt=attempt,
                     messages=messages,
                     duration_ms=duration_ms,
                     status="error",
@@ -175,41 +193,59 @@ class AiClient:
 
         return {}  # fallback
 
+    @staticmethod
+    def _usage_getattr(obj: Any, name: str) -> int:
+        """安全读取 usage 子字段，缺失时返回 0（兼容不同 provider 的字段差异）。"""
+        try:
+            val = getattr(obj, name, None)
+            return int(val) if val is not None else 0
+        except (TypeError, ValueError):
+            return 0
+
     # ── 日志写入 ──
 
     async def _write_log(
         self,
         *,
-        span_seq: int,
+        seq: int,
         attempt: int,
         messages: list[dict],
         response_raw: str | None = None,
         response_json: dict | list | None = None,
         prompt_tokens: int = 0,
+        prompt_cache_hit_tokens: int = 0,
+        prompt_cache_miss_tokens: int = 0,
+        prompt_cache_write_tokens: int = 0,
         completion_tokens: int = 0,
+        reasoning_tokens: int = 0,
         duration_ms: int = 0,
         status: str = "success",
         error_msg: str | None = None,
     ):
-        """异步写入 ai_llm_logs 表。"""
+        """异步写入 ai_run_events 表。"""
         if not self._log_action:
             return  # 未设置日志上下文，跳过
         await LlmLogWriter.write(
-            trace_id=self._log_trace_id,
-            span_seq=span_seq,
-            attempt=attempt,
+            session_id=self._log_session_id,
+            message_id=self._log_message_id,
+            seq=seq,
+            event_type="llm_call",
             module=self._log_module,
             action=self._log_action,
-            session_id=self._log_session_id,
-            task_id=self._log_task_id,
+            provider=self._log_provider,
+            api_base=self.api_base,
             model=self.model,
             status=status,
             error_msg=error_msg,
-            messages=messages,
+            request_messages=messages,
             response_raw=response_raw,
             response_json=response_json,
             prompt_tokens=prompt_tokens,
+            prompt_cache_hit_tokens=prompt_cache_hit_tokens,
+            prompt_cache_miss_tokens=prompt_cache_miss_tokens,
+            prompt_cache_write_tokens=prompt_cache_write_tokens,
             completion_tokens=completion_tokens,
+            reasoning_tokens=reasoning_tokens,
             duration_ms=duration_ms,
         )
 

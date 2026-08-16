@@ -34,7 +34,12 @@ async def lifespan(app: FastAPI):
     worker = get_worker()
     await worker.start()
 
-    # 启动 LLM 日志定时清理（每天凌晨 3:00 删除 90 天前日志）
+    # 启动 AI 用量每日汇总（每天凌晨 2:30 聚合昨天用量）
+    from app.ai.llm_log.aggregator import get_usage_aggregator
+    aggregator = get_usage_aggregator()
+    await aggregator.start()
+
+    # 启动 AI 运行事件定时清理（每天凌晨 3:00 删除过期事件）
     from app.ai.llm_log.cleanup import get_llm_log_cleanup
     cleanup = get_llm_log_cleanup()
     await cleanup.start()
@@ -45,6 +50,7 @@ async def lifespan(app: FastAPI):
 
     yield
 
+    await aggregator.stop()
     await cleanup.stop()
     await scheduler.stop()
     await worker.stop()

@@ -23,7 +23,6 @@ from app.ai.chat.schemas import (
 from app.ai.agent.skills.base import skill_registry
 from app.ai.chat.session_manager import SessionContext
 from app.ai.chat.orchestrator import chat_orchestrator
-from app.ai.llm_log.writer import make_trace_id
 from app.aitc.task.schemas import TaskCreate
 from app.aitc.task.engine import TaskEngine
 
