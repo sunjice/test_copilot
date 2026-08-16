@@ -19,7 +19,7 @@
 
     <!-- 右侧对话区 -->
     <div class="ai-chat-main">
-      <ChatPanel :context="context" />
+      <ChatPanel />
     </div>
   </div>
 </template>
@@ -35,13 +35,13 @@ const aiContextStore = useAiContextStore()
 
 // ── 工作区折叠 ──
 const workspaceCollapsed = ref(false)
-const workspaceWidth = ref(280)
+const workspaceWidth = ref(400)
 const MIN_WIDTH = 200
 const MAX_WIDTH = 560
 
 function toggleWorkspace() {
   workspaceCollapsed.value = !workspaceCollapsed.value
-  workspaceWidth.value = workspaceCollapsed.value ? 40 : 280
+  workspaceWidth.value = workspaceCollapsed.value ? 40 : 400
 }
 
 // ── 工作区宽度拖拽 ──
@@ -72,24 +72,10 @@ onBeforeUnmount(() => {
   document.removeEventListener("mouseup", onResizeEnd)
 })
 
-/** 驼峰转下划线 */
-function toSnake(key: string): string {
-  return key.replace(/([A-Z])/g, "_$1").toLowerCase()
-}
-
-// ── 当前上下文（工作区选择结果，传给 ChatPanel 展示 + 注入后端） ──
-// 后端 CaseContextBuilder 消费蛇形字段，这里统一转换
-const context = ref<Record<string, any>>({})
-
+// ── 工作区选择变化 → 同步到全局 aiContextStore ──
+// store 内部会自动把驼峰字段转成下划线（contextJson），
+// ChatPanel 监听 contextJson 注入到 pageContext，随消息发送到后端
 function onContextChange(ctx: Record<string, any>) {
-  // 驼峰 → 蛇形，与后端字段对齐
-  const snake: Record<string, any> = {}
-  for (const [k, v] of Object.entries(ctx)) {
-    snake[toSnake(k)] = v
-  }
-  context.value = snake
-
-  // 同步到全局 aiContextStore（useChat 发消息时经 pageContext 注入后端）
   aiContextStore.register("case")
   aiContextStore.update(ctx)
 }
