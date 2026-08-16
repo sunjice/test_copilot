@@ -1,9 +1,11 @@
 """认证服务。"""
 
+import jwt as pyjwt
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from loguru import logger
 
+from app.config import settings
 from app.constants import ROOT_ROLE_CODE
 from app.auth.utils import verify_password
 from app.auth.schemas import SecurityUser, SysUserDetails
@@ -58,9 +60,34 @@ class AuthService:
         logger.info("User logged out")
 
     async def refresh_token(self, refresh_token: str) -> dict:
-        """刷新访问令牌。"""
+        """刷新访问令牌。
+
+        关键：refresh token 的 payload 不包含 roles/isRoot，直接用它重签会导致
+        刷新后的 access token 丢失角色信息（超管变无角色 → 403）。
+        因此这里先从 refresh token 解出 userId，再查库拿到最新角色重新构造 user。
+        """
         token_manager = await get_token_manager()
-        new_token = await token_manager.refresh_token(refresh_token)
+        # 1. 解出 userId（不校验签名之外的逻辑，仅取 userId）
+        user_id: int | None = None
+        try:
+            claims = pyjwt.decode(refresh_token, settings.JWT_SECRET_KEY, algorithms=["HS256"])
+            if claims.get("type") == "refresh":
+                user_id = claims.get("userId")
+        except (pyjwt.ExpiredSignatureError, pyjwt.InvalidTokenError):
+            user_id = None
+
+        # 2. 根据 userId 查库，重构造携带最新角色的 user（复用登录时的 _build_token 逻辑）
+        user_details: SysUserDetails | None = None
+        if user_id is not None:
+            result = await self.db.execute(
+                select(SysUser).where(SysUser.id == user_id, SysUser.is_deleted == 0)
+            )
+            user = result.scalar_one_or_none()
+            if user is not None and user.status == 1:
+                user_details = await self._build_user_details(user)
+
+        # 3. 刷新：优先用查库后的 user（角色完整），退回旧逻辑
+        new_token = await token_manager.refresh_token(refresh_token, user_details)
         if new_token is None:
             raise BusinessException(code=ResultCode.TOKEN_REFRESH_FAIL, msg="刷新令牌无效或过期")
         return {
@@ -126,8 +153,8 @@ class AuthService:
             raise BusinessException(code=ResultCode.USER_DISABLED, msg="用户已被禁用")
         return await self._build_token(user)
 
-    async def _build_token(self, user: SysUser) -> dict:
-        """查用户角色及 data_scope，构造 token 并签发。"""
+    async def _build_user_details(self, user: SysUser) -> SysUserDetails:
+        """查用户角色及 data_scope，构造 SysUserDetails（含完整 roles/isRoot）。"""
         role_result = await self.db.execute(
             text("""
                 SELECT r.code, r.data_scope
@@ -158,10 +185,14 @@ class AuthService:
             email=user.email,
             avatar=user.avatar,
         )
-        user_details = SysUserDetails.from_security_user(security_user, is_root=is_root)
+        return SysUserDetails.from_security_user(security_user, is_root=is_root)
+
+    async def _build_token(self, user: SysUser) -> dict:
+        """查用户角色及 data_scope，构造 token 并签发。"""
+        user_details = await self._build_user_details(user)
         token_manager = await get_token_manager()
         token = await token_manager.generate_token(user_details)
-        logger.info(f"User login: {user.username} | roles={roles}")
+        logger.info(f"User login: {user.username} | roles={user_details.roles}")
         return {
             "accessToken": token.accessToken,
             "refreshToken": token.refreshToken,

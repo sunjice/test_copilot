@@ -136,7 +136,12 @@ class JwtTokenManager(TokenManager):
     async def validate_token(self, token: str) -> bool:
         return await self.parse_token(token) is not None
 
-    async def refresh_token(self, refresh_token: str) -> AuthenticationToken | None:
+    async def refresh_token(self, refresh_token: str, user: SysUserDetails | None = None) -> AuthenticationToken | None:
+        """刷新访问令牌。
+
+        参数 user 由上层（AuthService）传入时，会携带最新的角色/isRoot 信息；
+        未传入时退回从 refresh token payload 里读取（兼容旧逻辑，但角色可能缺失）。
+        """
         try:
             claims = jwt.decode(refresh_token, self._secret, algorithms=["HS256"])
             if claims.get("type") != "refresh":
@@ -144,11 +149,12 @@ class JwtTokenManager(TokenManager):
             token_version = await self._get_token_version(claims.get("userId", 0))
             if claims.get("tokenVersion") != token_version:
                 return None
-            user = SysUserDetails(
-                userId=claims["userId"],
-                username=claims.get("username", ""),
-                roles=set(claims.get("roles", [])),
-            )
+            if user is None:
+                user = SysUserDetails(
+                    userId=claims["userId"],
+                    username=claims.get("username", ""),
+                    roles=set(claims.get("roles", [])),
+                )
             return await self.generate_token(user)
         except (jwt.ExpiredSignatureError, jwt.InvalidTokenError):
             return None
