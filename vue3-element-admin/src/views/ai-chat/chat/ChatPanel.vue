@@ -296,29 +296,6 @@ const hasTasks = computed(() =>
   })
 )
 
-// ── 会话持久化（切页面后恢复到上次会话） ──
-const SESSION_KEY = "ai-chat-active-session-id"
-
-function persistSessionId(id: number | null) {
-  try {
-    if (id != null) sessionStorage.setItem(SESSION_KEY, String(id))
-    else sessionStorage.removeItem(SESSION_KEY)
-  } catch {
-    // 忽略存储异常
-  }
-}
-
-function restoreSessionId(): number | null {
-  try {
-    const v = sessionStorage.getItem(SESSION_KEY)
-    return v ? Number(v) : null
-  } catch {
-    return null
-  }
-}
-
-watch(activeSessionId, (id) => persistSessionId(id))
-
 // ── 滚动位置缓存（keep-alive 场景） ──
 const savedScrollTop = ref<number | null>(null)
 
@@ -337,15 +314,9 @@ function restoreScrollPosition() {
   }
 }
 
-// ── 初始化 ──
+// ── 初始化：只加载会话列表，不自动选中任何历史会话（每次进入都是新对话） ──
 onMounted(async () => {
   await init()
-  const savedId = restoreSessionId()
-  if (savedId != null && sessions.value.some((s) => s.id === savedId)) {
-    await selectSession(savedId)
-  } else if (sessions.value.length > 0) {
-    await selectSession(sessions.value[0].id!)
-  }
   await nextTick()
   scrollToBottom()
 })
