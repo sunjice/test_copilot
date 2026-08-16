@@ -46,39 +46,22 @@
 
     <!-- 右：轨迹详情 -->
     <div class="right-panel">
-      <!-- 用量汇总 -->
-      <el-card v-if="usage" class="usage-card" shadow="never">
-        <template #header>
-          <div class="flex items-center justify-between">
-            <span class="font-semibold">本轮用量汇总</span>
-            <span class="text-xs text-gray-400">轮 #{{ activeMessageId }}</span>
-          </div>
-        </template>
-        <div class="usage-grid">
-          <div class="usage-item">
-            <div class="usage-label">输入</div>
-            <div class="usage-value">{{ fmtNum(usage.prompt_tokens) }}</div>
-            <div class="usage-sub">
-              命中 {{ fmtNum(usage.prompt_cache_hit_tokens) }} /
-              未命中 {{ fmtNum(usage.prompt_cache_miss_tokens) }} /
-              写入 {{ fmtNum(usage.prompt_cache_write_tokens) }}
-            </div>
-          </div>
-          <div class="usage-item">
-            <div class="usage-label">输出</div>
-            <div class="usage-value">{{ fmtNum(usage.completion_tokens) }}</div>
-            <div class="usage-sub">
-              思考 {{ fmtNum(usage.reasoning_tokens) }} /
-              回复 {{ fmtNum(usage.reply_tokens) }}
-            </div>
-          </div>
-          <div class="usage-item">
-            <div class="usage-label">缓存命中率</div>
-            <div class="usage-value">{{ (usage.cache_hit_rate * 100).toFixed(1) }}%</div>
-            <div class="usage-sub">{{ usage.request_count }} 次调用</div>
-          </div>
-        </div>
-      </el-card>
+      <!-- 用量汇总（紧凑单行） -->
+      <div v-if="usage" class="usage-bar">
+        <span class="usage-title">轮 #{{ activeMessageId }}</span>
+        <span class="usage-cell">
+          <em>输入</em>{{ fmtNum(usage.prompt_tokens) }}
+          <i>命中 {{ fmtNum(usage.prompt_cache_hit_tokens) }} · 未命中 {{ fmtNum(usage.prompt_cache_miss_tokens) }} · 写入 {{ fmtNum(usage.prompt_cache_write_tokens) }}</i>
+        </span>
+        <span class="usage-cell">
+          <em>输出</em>{{ fmtNum(usage.completion_tokens) }}
+          <i>思考 {{ fmtNum(usage.reasoning_tokens) }} · 回复 {{ fmtNum(usage.reply_tokens) }}</i>
+        </span>
+        <span class="usage-cell">
+          <em>缓存命中率</em>{{ (usage.cache_hit_rate * 100).toFixed(1) }}%
+          <i>{{ usage.request_count }} 次调用</i>
+        </span>
+      </div>
 
       <!-- 调用链 -->
       <el-card class="trace-card" shadow="never">
@@ -327,16 +310,28 @@ onMounted(loadSessions)
 <style scoped>
 .ai-trace-page {
   display: flex;
-  gap: 12px;
-  height: calc(100vh - 120px);
-  padding: 4px;
+  gap: 10px;
+  height: calc(100vh - 108px);
+  padding: 0;
 }
 
 .left-panel {
-  width: 300px;
+  width: 280px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
+}
+
+.left-panel :deep(.el-card__header) {
+  padding: 8px 12px;
+}
+
+.left-panel :deep(.el-card__body) {
+  padding: 10px 12px;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .round-list {
@@ -345,10 +340,10 @@ onMounted(loadSessions)
 }
 
 .round-item {
-  padding: 10px 12px;
-  border-radius: 6px;
+  padding: 6px 10px;
+  border-radius: 4px;
   cursor: pointer;
-  margin-bottom: 6px;
+  margin-bottom: 5px;
   border: 1px solid transparent;
   transition: all 0.2s;
   background: #f7f8fa;
@@ -376,13 +371,13 @@ onMounted(loadSessions)
 .round-time {
   font-size: 12px;
   color: #909399;
-  margin-top: 4px;
+  margin-top: 2px;
 }
 
 .round-actions {
   font-size: 12px;
   color: #606266;
-  margin-top: 2px;
+  margin-top: 1px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -392,43 +387,77 @@ onMounted(loadSessions)
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
   overflow: hidden;
+  min-width: 0;
 }
 
-.usage-card {
+/* ── 紧凑单行用量栏 ── */
+.usage-bar {
   flex-shrink: 0;
-}
-
-.usage-grid {
   display: flex;
-  gap: 24px;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 12px;
+  background: #fff;
+  border-radius: 4px;
+  border: 1px solid var(--el-border-color-lighter);
+  font-size: 13px;
+  flex-wrap: wrap;
 }
 
-.usage-item {
-  flex: 1;
-  padding: 8px 16px;
-  background: #f7f8fa;
-  border-radius: 6px;
+.usage-title {
+  font-weight: 600;
+  color: #303133;
 }
 
-.usage-label {
+.usage-cell {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.usage-cell em {
+  font-style: normal;
   font-size: 12px;
   color: #909399;
 }
 
-.usage-value {
-  font-size: 22px;
-  font-weight: 700;
-  margin: 4px 0;
+.usage-cell {
+  font-weight: 600;
+  color: #303133;
 }
 
-.usage-sub {
+.usage-cell i {
+  font-style: normal;
   font-size: 12px;
-  color: #606266;
+  font-weight: 400;
+  color: #909399;
 }
 
+/* ── 调用链卡片占满剩余高度 ── */
 .trace-card {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.trace-card :deep(.el-card__header) {
+  padding: 8px 12px;
+}
+
+.trace-card :deep(.el-card__body) {
+  padding: 8px 12px;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.trace-card :deep(.el-card__body) > div {
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -436,14 +465,15 @@ onMounted(loadSessions)
 }
 
 .trace-list {
+  flex: 1;
   overflow-y: auto;
-  max-height: calc(100vh - 380px);
+  min-height: 0;
 }
 
 .trace-node {
-  padding: 10px 12px;
-  border-radius: 6px;
-  margin-bottom: 10px;
+  padding: 6px 10px;
+  border-radius: 4px;
+  margin-bottom: 6px;
   background: #fafafa;
   border-left: 3px solid #dcdfe6;
 }
@@ -466,8 +496,8 @@ onMounted(loadSessions)
 .node-meta {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px 16px;
-  margin-top: 8px;
+  gap: 4px 14px;
+  margin-top: 4px;
   font-size: 12px;
   color: #606266;
 }
@@ -477,8 +507,8 @@ onMounted(loadSessions)
 }
 
 .node-error {
-  margin-top: 6px;
-  padding: 6px 8px;
+  margin-top: 4px;
+  padding: 4px 8px;
   background: #fef0f0;
   color: var(--el-color-danger);
   border-radius: 4px;
@@ -486,16 +516,16 @@ onMounted(loadSessions)
 }
 
 .node-detail {
-  margin-top: 8px;
+  margin-top: 6px;
 }
 
 .json-pre {
   background: #f5f7fa;
-  padding: 10px;
+  padding: 8px;
   border-radius: 4px;
   font-size: 12px;
   overflow-x: auto;
-  max-height: 400px;
+  max-height: 50vh;
   white-space: pre-wrap;
   word-break: break-all;
 }
