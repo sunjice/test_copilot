@@ -97,9 +97,20 @@ function formatDuration(ms: number): string {
   return `${(ms / 1000).toFixed(1)}s`
 }
 
-/** 当前已流逝时间（用于 running 态实时更新） */
+/**
+ * 当前已流逝时间（用于 running 态实时更新）。
+ *
+ * startedAt 有两种语义（历史遗留）：
+ * 1. 前端流式期间：performance.now() 相对时间（页面加载后毫秒，量级 ~几千）
+ * 2. 后端持久化：int(time.time() * 1000) Unix 毫秒时间戳（量级 ~1.7e12）
+ *
+ * 这里统一兼容：若 startedAt 是 Unix 时间戳（> 1e12），用 Date.now() 相减；
+ * 否则视为相对时间，用 performance.now() 相减。
+ */
 function elapsedStr(startedAt: number): string {
-  const elapsed = Math.round(performance.now() - startedAt)
+  const elapsed = startedAt > 1e12
+    ? Math.round(Date.now() - startedAt)
+    : Math.round(performance.now() - startedAt)
   return formatDuration(elapsed)
 }
 
@@ -115,7 +126,12 @@ function segTitleDuration(seg: Segment & { type: "thinking" }): string | null {
   if (!seg.startedAt) return null
   const dur = seg.durationMs != null
     ? seg.durationMs
-    : props.isStreaming ? Math.round(performance.now() - seg.startedAt) : null
+    : props.isStreaming
+      ? Math.round(
+        // 同样兼容 Unix 时间戳与相对时间两种语义
+        seg.startedAt > 1e12 ? Date.now() - seg.startedAt : performance.now() - seg.startedAt
+      )
+      : null
   if (dur == null) return null
   return `（${formatDuration(dur)}）`
 }

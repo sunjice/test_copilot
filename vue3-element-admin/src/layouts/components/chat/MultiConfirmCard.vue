@@ -11,7 +11,7 @@
       <div class="avatar-box">AI</div>
     </div>
     <div class="message-main">
-      <!-- 思考 + 工具调用原文（多卡片共享，按 card_seq 取首条 segments） -->
+      <!-- 思考 + 工具调用原文（多卡片共享，取首条 segments） -->
       <TurnRenderer
         v-if="firstSegments.length"
         :segments="firstSegments"
@@ -25,8 +25,9 @@
         :class="[`state-${confirmStateOf(msg)}`]"
       >
         <div class="confirm-card-body">
-          <!-- 左侧：信息 chip 横排 -->
+          <!-- 左侧：信息 chip 横排（前面带"创建任务："提示） -->
           <div v-if="hasStructuredMeta(msg)" class="confirm-chips">
+            <span class="confirm-card-tag">创建任务：</span>
             <span v-if="metaOf(msg).project_name" class="chip">
               <span class="chip-label">项目</span>
               <span class="chip-value">{{ metaOf(msg).project_name }}</span>
@@ -53,7 +54,7 @@
               :loading="loadingMap[msg.id ?? idx]"
               @click="onConfirm(msg, idx)"
             >
-              确认创建
+              确认
             </el-button>
             <el-button size="small" plain @click="onCancel(msg)">取消</el-button>
           </div>
@@ -107,37 +108,12 @@ const emit = defineEmits<{
 
 const loadingMap = reactive<Record<string | number, boolean>>({})
 
-/** 首条卡片的 segments（多卡时各卡 metadata.segments 相同，用首条渲染 TurnRenderer）
- * 修复：后端给的 startedAt 是 Unix 毫秒时间戳（int(time.time() * 1000)），
- * 前端 elapsedStr 用的是 performance.now()，两者混用会算出巨大负数。
- * 历史消息里的 tool 段都是已结算的（status='done'，durationMs 已写好），
- * 只需要把 startedAt 转换为相对的（不影响渲染，因为 done 状态走 durationMs 分支）。
- */
+/** 首条卡片的 segments（多卡时各卡 metadata.segments 相同，用首条渲染 TurnRenderer） */
 const firstSegments = computed<Segment[]>(() => {
   const first = props.messages[0]
-  const raw = (first?.metadata_json as any)?.segments
-  if (!Array.isArray(raw)) return []
-  const pageLoad = performance.now()
-  // 偏移量：把 Unix 时间戳（~1.7e12）映射到页面相对时间（~几千）
-  // offset = pageLoad - latestStartedAt (Unix)
-  let maxUnix = 0
-  for (const s of raw) {
-    const sa = (s as any).startedAt
-    if (typeof sa === "number" && sa > maxUnix) maxUnix = sa
-  }
-  const offset = maxUnix > 1e12 ? pageLoad - maxUnix : 0
-  return raw.map((s: any) => {
-    if (s.type === "tool") {
-      return {
-        ...s,
-        // 把 Unix 时间戳转换为相对时间（不影响 done 状态的渲染，但保险起见）
-        startedAt: typeof s.startedAt === "number" && s.startedAt > 1e12
-          ? Math.max(0, s.startedAt + offset)
-          : s.startedAt,
-      }
-    }
-    return s
-  })
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const segs = (first?.metadata_json as any)?.segments
+  return Array.isArray(segs) ? (segs as Segment[]) : []
 })
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -152,7 +128,20 @@ function hasStructuredMeta(msg: ChatMessage): boolean {
 
 function taskLabelOf(msg: ChatMessage): string {
   const m = metaOf(msg)
-  return m.task_label || m.task_type || m.skill_name || ""
+  const raw = m.task_label || m.task_type || m.skill_name || ""
+  return SKILL_LABELS[raw] || raw
+}
+
+/**
+ * 技能命令 → 中文标签（优先使用后端的 task_label，否则按 skill_name 映射）
+ * 与 LayoutChat/ChatPanel 的 SKILL_LABELS 保持一致
+ */
+const SKILL_LABELS: Record<string, string> = {
+  core_select: "挑选核心用例",
+  case_review: "审核用例质量",
+  script_gen: "生成测试脚本",
+  case_complete: "完善测试用例",
+  case_design: "设计测试用例",
 }
 
 interface Option { id: string; label: string; description?: string }
@@ -236,6 +225,16 @@ function onCancel(msg: ChatMessage) {
   padding: 6px 10px;
   margin-top: 6px;
   transition: opacity 0.2s;
+}
+
+.confirm-card-tag {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--el-color-primary);
+  letter-spacing: 0.3px;
+  line-height: 1.4;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .confirm-card.state-confirmed,

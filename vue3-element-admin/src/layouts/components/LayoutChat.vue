@@ -123,17 +123,24 @@
           </div>
         </div>
 
-        <ChatMessage
-          v-for="(msg, idx) in messages"
-          :key="msg.id || `${msg.role}-${idx}-${msg.create_time}`"
-          :msg="msg"
-          @viewDraft="onViewDraft"
-          @confirmDraft="onConfirmDraft"
-          @confirmTask="onConfirmTask"
-          @cancelTask="onCancelTask"
-          @submitClarify="onSubmitClarify"
-          @retry="onRetry"
-        />
+        <template v-for="item in groupedMessages" :key="item.key">
+          <MultiConfirmCard
+            v-if="item.kind === 'confirm-group'"
+            :messages="item.messages"
+            @confirm-task="onConfirmTaskFromGroup"
+            @cancel-task="onCancelTaskFromGroup"
+          />
+          <ChatMessage
+            v-else
+            :msg="item.msg"
+            @viewDraft="onViewDraft"
+            @confirmDraft="onConfirmDraft"
+            @confirmTask="onConfirmTask"
+            @cancelTask="onCancelTask"
+            @submitClarify="onSubmitClarify"
+            @retry="onRetry"
+          />
+        </template>
 
         <StreamingBubble
           v-if="streaming"
@@ -276,6 +283,8 @@ import {
 import ChatMessage from "./chat/ChatMessage.vue"
 import TaskListPanel from "./chat/TaskListPanel.vue"
 import StreamingBubble from "./chat/StreamingBubble.vue"
+import MultiConfirmCard from "./chat/MultiConfirmCard.vue"
+import { useMessageGrouping } from "./chat/useMessageGrouping"
 import { useChat } from "./chat/useChat"
 import { useAiContextStore } from "@/stores/aiContext"
 import { useChatResize, useInputResize, RESIZE_DIRS } from "./chat/useChatResize"
@@ -359,6 +368,9 @@ const {
 const hasTasks = computed(() =>
   messages.value.some((m) => m.msg_type === "task_card")
 )
+
+// ── 消息分组：连续的 assistant confirm_card 合并渲染（共享逻辑） ──
+const groupedMessages = useMessageGrouping(messages)
 
 // ── 初始化（只执行一次） ──
 const inited = ref(false)
@@ -741,6 +753,16 @@ function onConfirmTask(metadata: Record<string, any>) {
 }
 
 function onCancelTask(metadata: Record<string, any>) {
+  cancelTask(metadata)
+}
+
+// ── 合并卡片（MultiConfirmCard）事件转发 ──
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function onConfirmTaskFromGroup(_msg: any, metadata: Record<string, any>) {
+  confirmCreateTask(metadata)
+}
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function onCancelTaskFromGroup(_msg: any, metadata: Record<string, any>) {
   cancelTask(metadata)
 }
 

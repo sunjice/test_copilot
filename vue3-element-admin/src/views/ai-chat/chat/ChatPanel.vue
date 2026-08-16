@@ -243,7 +243,8 @@ import {
 import ChatMessage from "@/layouts/components/chat/ChatMessage.vue"
 import TaskListPanel from "@/layouts/components/chat/TaskListPanel.vue"
 import StreamingBubble from "@/layouts/components/chat/StreamingBubble.vue"
-import MultiConfirmCard from "./MultiConfirmCard.vue"
+import MultiConfirmCard from "@/layouts/components/chat/MultiConfirmCard.vue"
+import { useMessageGrouping } from "@/layouts/components/chat/useMessageGrouping"
 import { useChat } from "@/layouts/components/chat/useChat"
 import { useInputResize } from "@/layouts/components/chat/useChatResize"
 import { formatHistoryTime } from "@/layouts/components/chat/utils"
@@ -301,48 +302,8 @@ watch(
   { deep: true, immediate: true }
 )
 
-// ── 消息分组：连续的 assistant confirm_card 合并渲染 ──
-type GroupItem =
-  | { kind: "single"; msg: ChatMessageType; key: string }
-  | { kind: "confirm-group"; messages: ChatMessageType[]; key: string }
-
-const groupedMessages = computed<GroupItem[]>(() => {
-  const list = messages.value
-  const result: GroupItem[] = []
-  let i = 0
-  let autoIdx = 0
-  while (i < list.length) {
-    const msg = list[i]
-    // 合并相邻的 confirm_card
-    if (msg.role === "assistant" && msg.msg_type === "confirm_card") {
-      const group: ChatMessageType[] = [msg]
-      let j = i + 1
-      while (j < list.length) {
-        const next = list[j]
-        if (
-          next.role === "assistant" &&
-          next.msg_type === "confirm_card"
-        ) {
-          group.push(next)
-          j++
-        } else {
-          break
-        }
-      }
-      result.push({
-        kind: "confirm-group",
-        messages: group,
-        key: `grp-${String(group[0]?.id ?? autoIdx++)}`,
-      })
-      i = j
-      continue
-    }
-    const k = `s-${String(msg.id || `${msg.role}-${autoIdx++}-${msg.create_time}`)}`
-    result.push({ kind: "single", msg, key: k })
-    i++
-  }
-  return result
-})
+// ── 消息分组：连续的 assistant confirm_card 合并渲染（共享逻辑） ──
+const groupedMessages = useMessageGrouping(messages)
 
 // 合并卡片里转发的确认/取消事件 → 走原 useChat 的 confirmCreateTask/cancelTask
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
