@@ -888,14 +888,15 @@ VALUES
 (3081, 3080, '0,3000,3080', '规范查询', 'B', NULL, '', NULL, 'aitc:spec:list', NULL, 0, 0, 1, 1, '', '', '2026-08-01T10:52:52.561991', '2026-08-01T10:52:52.561991', NULL),
 (3082, 3080, '0,3000,3080', '规范创建', 'B', NULL, '', NULL, 'aitc:spec:create', NULL, 0, 0, 1, 2, '', '', '2026-08-01T10:52:52.561991', '2026-08-01T10:52:52.561991', NULL),
 (3083, 3080, '0,3000,3080', '规范编辑', 'B', NULL, '', NULL, 'aitc:spec:update', NULL, 0, 0, 1, 3, '', '', '2026-08-01T10:52:52.561991', '2026-08-01T10:52:52.561991', NULL),
-(3084, 3080, '0,3000,3080', '规范删除', 'B', NULL, '', NULL, 'aitc:spec:delete', NULL, 0, 0, 1, 4, '', '', '2026-08-01T10:52:52.561991', '2026-08-01T10:52:52.561991', NULL);
+(3084, 3080, '0,3000,3080', '规范删除', 'B', NULL, '', NULL, 'aitc:spec:delete', NULL, 0, 0, 1, 4, '', '', '2026-08-01T10:52:52.561991', '2026-08-01T10:52:52.561991', NULL),
+(3090, 3000, '0,3000', 'AI轨迹', 'M', 'AITCTrace', 'ai-trace', 'aitc/ai-trace', NULL, NULL, 0, 1, 1, 9, 'el-icon-DataLine', '', now(), now(), '[]');
 
 -- 授权：ROOT (role_id=1) + ADMIN (role_id=2) 获取所有 AITC 菜单
 INSERT INTO sys_role_menu (role_id, menu_id)
-SELECT 1, id FROM sys_menu WHERE id BETWEEN 3000 AND 3084
+SELECT 1, id FROM sys_menu WHERE id BETWEEN 3000 AND 3090
 ON CONFLICT DO NOTHING;
 INSERT INTO sys_role_menu (role_id, menu_id)
-SELECT 2, id FROM sys_menu WHERE id BETWEEN 3000 AND 3084
+SELECT 2, id FROM sys_menu WHERE id BETWEEN 3000 AND 3090
 ON CONFLICT DO NOTHING;
 
 -- 重置序列
