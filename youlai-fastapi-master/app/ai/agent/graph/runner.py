@@ -492,14 +492,26 @@ class AgentRunner:
             content = ""
             tool_calls: list[dict] = []
             usage: dict = {}
+            raw_usage: dict = {}
             if isinstance(output, AIMessage):
                 content = output.content if isinstance(output.content, str) else json.dumps(
                     output.content, ensure_ascii=False, default=str,
                 )
                 tool_calls = [dict(tc) for tc in (output.tool_calls or [])]
                 usage = output.usage_metadata or {}
-            elif output is not None:
-                content = str(output)
+                # 原始 token_usage：DeepSeek 的缓存命中字段在这里（LangChain 规范化会丢失）
+                rm = output.response_metadata or {}
+                raw_usage = rm.get("token_usage") or {}
+
+            # 从两个来源提取缓存 token：
+            #  1) raw_usage（DeepSeek 原始字段 prompt_cache_hit_tokens / prompt_cache_miss_tokens / prompt_cache_write_tokens）
+            #  2) usage（LangChain 规范化字段 input_token_details.cache_read / cache_creation）
+            itd = usage.get("input_token_details") or {}
+            cache_hit = raw_usage.get("prompt_cache_hit_tokens") or itd.get("cache_read") or 0
+            cache_miss = raw_usage.get("prompt_cache_miss_tokens") or 0
+            cache_write = raw_usage.get("prompt_cache_write_tokens") or itd.get("cache_creation") or 0
+            otd = usage.get("output_token_details") or {}
+            reasoning = usage.get("reasoning_tokens") or otd.get("reasoning") or 0
 
             await LlmLogWriter.write(
                 session_id=session_id,
@@ -516,7 +528,11 @@ class AgentRunner:
                 response_raw=content,
                 response_json={"tool_calls": tool_calls} if tool_calls else None,
                 prompt_tokens=usage.get("input_tokens", 0),
+                prompt_cache_hit_tokens=int(cache_hit),
+                prompt_cache_miss_tokens=int(cache_miss),
+                prompt_cache_write_tokens=int(cache_write),
                 completion_tokens=usage.get("output_tokens", 0),
+                reasoning_tokens=int(reasoning),
                 duration_ms=duration_ms,
             )
         except Exception as e:

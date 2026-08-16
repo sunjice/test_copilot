@@ -42,6 +42,7 @@ def _get_or_create_llm(cfg: AiConfigSnapshot) -> ChatOpenAI:
             timeout=60.0,            # LLM 调用超时（降到 60s，更快失败）
             max_retries=2,           # 网络波动自动重试
             streaming=True,          # 必须开启，否则 astream_events 收不到 on_chat_model_stream
+            stream_usage=True,       # 流式下也返回 usage（含 DeepSeek 缓存命中字段）
         )
     return _llm_cache[fp]
 
