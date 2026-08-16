@@ -284,27 +284,15 @@ async def confirm_create_task(
         create_by=user.username,
     )
 
-    # 保存 assistant 确认消息
-    task_type_label = {"core_select": "挑选核心用例", "case_review": "用例审核", "script_gen": "生成测试脚本", "case_complete": "补全用例字段"}.get(req.skill_name, req.skill_name)
-    total_count = task_vo.total_count
-    scope_desc = f"已选中的 {total_count} 条" if req.case_ids else "当前模块下的"
-    content = f"已创建{task_type_label}任务，将对{scope_desc}用例逐条处理。完成后可点击查看。"
-
-    await usecase.add_message(
-        session_id, "assistant",
-        content,
-        msg_type="task_card",
-        metadata={
-            "skill_name": req.skill_name,
-            "task_id": task_vo.id,
-            "project_id": req.project_id,
-            "suite_id": req.suite_id,
-            "total": task_vo.total_count,
-        },
-    )
-
-    # 回写 confirm_card 消息的 metadata_json，标记已确认（多卡片时按 card_seq 精确定位）
-    confirm_meta: dict = {"confirm_status": "confirmed"}
+    # 回写 confirm_card 消息的 metadata_json，标记已确认并内嵌任务信息
+    # （任务进度直接展示在确认卡片中，不再单独写 task_card 消息）
+    confirm_meta: dict = {
+        "confirm_status": "confirmed",
+        "task_id": task_vo.id,
+        "task_status": 0,
+        "done_count": 0,
+        "total_count": task_vo.total_count,
+    }
     if req.selected_option:
         confirm_meta["_selected_option"] = req.selected_option
     await usecase.update_card_metadata_by_seq(

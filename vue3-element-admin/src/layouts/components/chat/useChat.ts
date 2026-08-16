@@ -4,7 +4,7 @@ import { ref, reactive, computed, nextTick, onUnmounted } from "vue"
 import { ElMessage } from "element-plus"
 import { ChatSessionAPI, ChatMessageAPI, ChatDraftAPI, ChatSkillAPI, ChatContextAPI, ChatTaskAPI } from "@/api/chat/index"
 import TaskAPI from "@/api/aitc/task"
-import { TASK_TYPE_MAP } from "@/views/aitc/constants"
+
 import type {
   ChatSession,
   ChatMessage,
@@ -571,24 +571,46 @@ export function useChat() {
   })
 
   /** 创建/查找进度消息并轮询任务状态，完成后更新消息内容 */
-  /** 更新确认创建的消息中的任务状态 */
+  /** 更新任务状态：同时更新 confirm_card（新逻辑）与 task_card（兼容历史数据） */
   function updateConfirmCardTaskStatus(taskId: number, status: number, done: number, total: number) {
+    // 1) 优先更新 confirm_card（新逻辑：任务进度内嵌在确认卡片中）
+    let updated = false
+    for (let i = messages.value.length - 1; i >= 0; i--) {
+      const m = messages.value[i]
+      if (m.msg_type === "confirm_card" && m.metadata_json?.task_id === taskId) {
+        messages.value[i] = {
+          ...m,
+          metadata_json: {
+            ...(m.metadata_json || {}),
+            task_status: status,
+            done_count: done,
+            total_count: total,
+          },
+        }
+        updated = true
+        break
+      }
+    }
+    // 2) 兼容历史数据：旧的 task_card 消息仍需要更新进度
     const idx = messages.value.findIndex(
       m => m.msg_type === "task_card"
         && m.metadata_json?.task_id === taskId
         && !m.metadata_json?._task_progress
     )
-    if (idx === -1) return
-    const msg = messages.value[idx]
-    messages.value[idx] = {
-      ...msg,
-      metadata_json: {
-        ...(msg.metadata_json || {}),
-        task_status: status,
-        done_count: done,
-        total_count: total,
-      },
+    if (idx !== -1) {
+      const msg = messages.value[idx]
+      messages.value[idx] = {
+        ...msg,
+        metadata_json: {
+          ...(msg.metadata_json || {}),
+          task_status: status,
+          done_count: done,
+          total_count: total,
+        },
+      }
+      updated = true
     }
+    void updated
   }
 
   function startTaskMonitor(taskId: number, skillName: string) {
@@ -615,11 +637,17 @@ export function useChat() {
     taskMonitors.set(taskId, intervalId)
   }
 
-  /** 为已加载的历史消息中未完成任务启动监控，同时补齐已完成/失败任务的计数 */
+  /** 为已加载的历史消息中未完成任务启动监控，同时补齐已完成/失败任务的计数
+   * 兼容两种消息类型：
+   * - task_card（历史数据）
+   * - confirm_card 带 task_id（新逻辑：进度内嵌在确认卡片中）
+   */
   async function monitorIncompleteTasks() {
     for (let i = 0; i < messages.value.length; i++) {
       const msg = messages.value[i]
-      if (msg.msg_type !== "task_card") continue
+      const isTaskCard = msg.msg_type === "task_card"
+      const isConfirmCard = msg.msg_type === "confirm_card"
+      if (!isTaskCard && !isConfirmCard) continue
       const taskId = msg.metadata_json?.task_id
       if (!taskId) continue
 
@@ -695,34 +723,15 @@ export function useChat() {
 
       const taskId = res.task_id
       const total = res.total_count ?? metadata.total ?? 0
-      const label = TASK_TYPE_MAP[skillName]?.label || skillName
-      const scopeDesc = caseIds?.length ? `已选中的 ${caseIds.length} 条` : '当前模块下的'
-      const content = `已创建${label}任务，将对${scopeDesc}用例逐条处理。完成后可点击查看。`
 
-      // 本地追加 task_card 消息（不调用 loadMessages，避免数组替换闪烁）
-      const taskMsg: ChatMessage = {
-        id: null,
-        session_id: sessionId,
-        role: "assistant",
-        msg_type: "task_card",
-        content,
-        metadata_json: {
-          skill_name: skillName,
-          task_id: taskId,
-          project_id: projectId,
-          suite_id: suiteId,
-          total,
-          task_status: 0,
-          done_count: 0,
-          total_count: total,
-        },
-        draft_id: null,
-        create_time: new Date().toISOString(),
-      }
-      messages.value.push(taskMsg)
-
-      // 回写本地 confirm_card 消息的 metadata_json，标记已确认（按 card_seq 精确定位）
-      updateCardStatusInMessages(cardSeq, "confirmed", selectedOption)
+      // 回写本地 confirm_card 消息的 metadata_json，标记已确认 + 写入任务字段
+      // （任务进度直接内嵌在确认卡片中，不再额外追加 task_card 消息）
+      updateCardStatusInMessages(cardSeq, "confirmed", selectedOption, {
+        task_id: taskId,
+        task_status: 0,
+        done_count: 0,
+        total_count: total,
+      })
 
       await loadSessions()
 
@@ -751,7 +760,12 @@ export function useChat() {
   }
 
   /** 找到 messages 中对应的 confirm_card（card_seq 为空时回退到最后一条未处理），更新其 metadata_json */
-  function updateCardStatusInMessages(cardSeq: number | null, status: string, selectedOption?: string) {
+  function updateCardStatusInMessages(
+    cardSeq: number | null,
+    status: string,
+    selectedOption?: string,
+    taskFields?: Record<string, any>,
+  ) {
     for (let i = messages.value.length - 1; i >= 0; i--) {
       const m = messages.value[i]
       if (m.msg_type !== "confirm_card" || m.metadata_json?.confirm_status) continue
@@ -759,6 +773,7 @@ export function useChat() {
       if (cardSeq != null && m.metadata_json?.card_seq !== cardSeq) continue
       const meta: Record<string, any> = { ...(m.metadata_json || {}), confirm_status: status }
       if (selectedOption) meta._selected_option = selectedOption
+      if (taskFields) Object.assign(meta, taskFields)
       messages.value[i] = { ...m, metadata_json: meta }
       break
     }

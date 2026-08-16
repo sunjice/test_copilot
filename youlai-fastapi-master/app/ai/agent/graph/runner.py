@@ -206,11 +206,23 @@ class AgentRunner:
                     logger.debug(f"[AgentRunner] 工具 {name} 执行完成")
 
                     # 结算 tool 区块（done 态 + durationMs）
+                    # 多任务并行时，按 name 精确匹配该工具的 running 段，
+                    # 避免"找最近 running"导致的错位结算。
+                    settled = False
                     for seg in reversed(segments):
                         if seg["type"] == "tool" and seg["status"] == "running":
-                            seg["status"] = "done"
-                            seg["durationMs"] = max(0, int((time.time() * 1000) - seg["startedAt"]))
-                            break
+                            if not name or seg.get("name") == name:
+                                seg["status"] = "done"
+                                seg["durationMs"] = max(0, int((time.time() * 1000) - seg["startedAt"]))
+                                settled = True
+                                break
+                    if not settled and name:
+                        # 兜底：name 匹配不上时，找最近的 running（兼容 name 为空）
+                        for seg in reversed(segments):
+                            if seg["type"] == "tool" and seg["status"] == "running":
+                                seg["status"] = "done"
+                                seg["durationMs"] = max(0, int((time.time() * 1000) - seg["startedAt"]))
+                                break
 
                     # 卡片数据：优先从 ToolMessage.artifact 读取
                     card = self._extract_card(output)

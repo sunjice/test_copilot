@@ -129,6 +129,7 @@
             :messages="item.messages"
             @confirm-task="onConfirmTaskFromGroup"
             @cancel-task="onCancelTaskFromGroup"
+            @view-task="onViewTask"
           />
           <ChatMessage
             v-else
@@ -273,7 +274,7 @@
 
 <script setup lang="ts">
 import { ref, shallowRef, watch, nextTick, computed } from "vue"
-import { useRoute } from "vue-router"
+import { useRoute, useRouter } from "vue-router"
 import { ElMessage, ElMessageBox } from "element-plus"
 import {
   ChatDotRound, Plus, DArrowRight, DArrowLeft, Promotion, ArrowLeft, ArrowDown, Clock, Delete, Search, Edit,
@@ -339,6 +340,7 @@ function onCollapsedUp() {
 }
 
 const route = useRoute()
+const router = useRouter()
 const aiContextStore = useAiContextStore()
 
 const {
@@ -364,9 +366,13 @@ const {
   init,
 } = useChat()
 
-// 是否有任务消息
+// 是否有任务消息（task_card 历史数据，或已确认的 confirm_card 内嵌任务）
 const hasTasks = computed(() =>
-  messages.value.some((m) => m.msg_type === "task_card")
+  messages.value.some(
+    (m) =>
+      m.msg_type === "task_card" ||
+      (m.msg_type === "confirm_card" && m.metadata_json?.task_id != null)
+  )
 )
 
 // ── 消息分组：连续的 assistant confirm_card 合并渲染（共享逻辑） ──
@@ -764,6 +770,13 @@ function onConfirmTaskFromGroup(_msg: any, metadata: Record<string, any>) {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function onCancelTaskFromGroup(_msg: any, metadata: Record<string, any>) {
   cancelTask(metadata)
+}
+function onViewTask(taskId: number) {
+  if (taskId) {
+    router.push(`/aitc/tasks/${taskId}`)
+  } else {
+    router.push("/aitc/tasks")
+  }
 }
 
 // ── 澄清卡片提交：将答案作为新消息发送给 LLM，并持久化答案状态 ──

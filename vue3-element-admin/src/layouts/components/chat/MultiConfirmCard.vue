@@ -58,10 +58,33 @@
             </el-button>
             <el-button size="small" plain @click="onCancel(msg)">取消</el-button>
           </div>
-          <div v-else-if="confirmStateOf(msg) === 'confirmed'" class="confirm-result-inline success">
-            任务已创建
+          <div v-else-if="confirmStateOf(msg) === 'confirmed'" class="confirm-confirmed-inline">
+            <span class="task-status-tag" :class="`status-${taskStatusOf(msg)}`">
+              {{ taskStatusLabel(msg) }}
+            </span>
+            <el-button
+              size="small"
+              type="primary"
+              plain
+              @click="onViewTask(msg)"
+            >
+              {{ taskButtonText(msg) }}
+            </el-button>
           </div>
           <div v-else class="confirm-result-inline muted">已取消</div>
+        </div>
+
+        <!-- confirmed 状态：进度条（有 task_id 且未完成时显示） -->
+        <div
+          v-if="confirmStateOf(msg) === 'confirmed' && taskIdOf(msg) && taskStatusOf(msg) < 2"
+          class="confirm-progress"
+        >
+          <el-progress
+            :percentage="progressPercent(msg)"
+            :stroke-width="4"
+            :show-text="false"
+          />
+          <span class="progress-text">{{ doneCountOf(msg) }} / {{ totalCountOf(msg) }}</span>
         </div>
 
         <!-- 多选项（审核范围选择等）单独占一行 -->
@@ -104,6 +127,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: "confirmTask", msg: ChatMessage, meta: Record<string, any>): void
   (e: "cancelTask", msg: ChatMessage, meta: Record<string, any>): void
+  (e: "viewTask", taskId: number): void
 }>()
 
 const loadingMap = reactive<Record<string | number, boolean>>({})
@@ -169,6 +193,58 @@ function confirmStateOf(msg: ChatMessage): "idle" | "confirmed" | "cancelled" {
   if (s === "confirmed") return "confirmed"
   if (s === "cancelled") return "cancelled"
   return "idle"
+}
+
+// ── 任务状态（confirmed 后内嵌进度） ──
+
+function taskIdOf(msg: ChatMessage): number | null {
+  const id = metaOf(msg).task_id
+  return id != null ? Number(id) : null
+}
+
+/** 任务状态：0=排队中 1=执行中 2=完成 3=失败 */
+function taskStatusOf(msg: ChatMessage): number {
+  const s = metaOf(msg).task_status
+  return s != null ? Number(s) : 0
+}
+
+const TASK_STATUS_LABELS: Record<number, string> = {
+  0: "排队中",
+  1: "执行中",
+  2: "已完成",
+  3: "失败",
+}
+
+function taskStatusLabel(msg: ChatMessage): string {
+  return TASK_STATUS_LABELS[taskStatusOf(msg)] || "排队中"
+}
+
+function taskButtonText(msg: ChatMessage): string {
+  const status = taskStatusOf(msg)
+  if (status === 2) return "查看结果"
+  if (status === 3) return "查看详情"
+  return "查看任务进度"
+}
+
+function doneCountOf(msg: ChatMessage): number {
+  return Number(metaOf(msg).done_count ?? 0)
+}
+
+function totalCountOf(msg: ChatMessage): number {
+  return Number(metaOf(msg).total_count ?? metaOf(msg).total ?? 0)
+}
+
+function progressPercent(msg: ChatMessage): number {
+  const total = totalCountOf(msg)
+  if (total <= 0) return 0
+  return Math.min(100, Math.round((doneCountOf(msg) / total) * 100))
+}
+
+function onViewTask(msg: ChatMessage) {
+  const taskId = taskIdOf(msg)
+  if (taskId != null) {
+    emit("viewTask", taskId)
+  }
 }
 
 function onConfirm(msg: ChatMessage, idx: number) {
@@ -291,6 +367,67 @@ function onCancel(msg: ChatMessage) {
   height: 24px;
   padding: 0 10px;
   font-size: 11px;
+}
+
+.confirm-confirmed-inline {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.confirm-confirmed-inline :deep(.el-button) {
+  height: 24px;
+  padding: 0 10px;
+  font-size: 11px;
+}
+
+.task-status-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.task-status-tag.status-0 {
+  background: var(--el-color-info-light-9);
+  color: var(--el-color-info);
+}
+
+.task-status-tag.status-1 {
+  background: var(--el-color-primary-light-9);
+  color: var(--el-color-primary);
+}
+
+.task-status-tag.status-2 {
+  background: var(--el-color-success-light-9);
+  color: var(--el-color-success);
+}
+
+.task-status-tag.status-3 {
+  background: var(--el-color-danger-light-9);
+  color: var(--el-color-danger);
+}
+
+.confirm-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.confirm-progress :deep(.el-progress) {
+  flex: 1;
+}
+
+.progress-text {
+  font-size: 11px;
+  color: var(--el-text-color-secondary);
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .confirm-result-inline {

@@ -101,6 +101,7 @@
             :messages="item.messages"
             @confirm-task="onConfirmTaskFromGroup"
             @cancel-task="onCancelTaskFromGroup"
+            @view-task="onViewTask"
           />
           <ChatMessage
             v-else
@@ -233,6 +234,7 @@
 
 <script setup lang="ts">
 import { ref, shallowRef, watch, nextTick, computed, onMounted } from "vue"
+import { useRouter } from "vue-router"
 import { ElMessage, ElMessageBox } from "element-plus"
 import type { ChatMessage as ChatMessageType } from "@/api/chat/types"
 import {
@@ -278,9 +280,13 @@ const {
   init,
 } = useChat()
 
-// 是否有任务消息
+// 是否有任务消息（task_card 历史数据，或已确认的 confirm_card 内嵌任务）
 const hasTasks = computed(() =>
-  messages.value.some((m) => m.msg_type === "task_card")
+  messages.value.some(
+    (m) =>
+      m.msg_type === "task_card" ||
+      (m.msg_type === "confirm_card" && m.metadata_json?.task_id != null)
+  )
 )
 
 // ── 初始化 ──
@@ -305,6 +311,8 @@ watch(
 // ── 消息分组：连续的 assistant confirm_card 合并渲染（共享逻辑） ──
 const groupedMessages = useMessageGrouping(messages)
 
+const router = useRouter()
+
 // 合并卡片里转发的确认/取消事件 → 走原 useChat 的 confirmCreateTask/cancelTask
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function onConfirmTaskFromGroup(_msg: ChatMessageType, meta: Record<string, any>) {
@@ -313,6 +321,13 @@ function onConfirmTaskFromGroup(_msg: ChatMessageType, meta: Record<string, any>
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function onCancelTaskFromGroup(_msg: ChatMessageType, meta: Record<string, any>) {
   cancelTask(meta)
+}
+function onViewTask(taskId: number) {
+  if (taskId) {
+    router.push(`/aitc/tasks/${taskId}`)
+  } else {
+    router.push("/aitc/tasks")
+  }
 }
 
 // ── 历史面板 ──
