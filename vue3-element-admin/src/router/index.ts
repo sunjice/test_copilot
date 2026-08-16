@@ -27,7 +27,7 @@ export const constantRoutes: RouteRecordRaw[] = [
     path: "/",
     name: "/",
     component: Layout,
-    redirect: "/dashboard",
+    redirect: "/ai-chat",
     children: [
       {
         path: "dashboard",
@@ -38,8 +38,9 @@ export const constantRoutes: RouteRecordRaw[] = [
         meta: {
           title: "dashboard",
           icon: "homepage",
-          affix: true,
+          affix: false,
           keepAlive: true,
+          hidden: true,
         },
       },
       {
@@ -94,6 +95,12 @@ export const constantRoutes: RouteRecordRaw[] = [
         name: "CoreReview",
         component: () => import("@/views/aitc/task/core_select/ReviewPage.vue"),
         meta: { title: "核心挑选审核", hidden: true, singleTab: true },
+      },
+      {
+        path: "ai-chat",
+        name: "AiChat",
+        component: () => import("@/views/ai-chat/index.vue"),
+        meta: { title: "AI 对话", icon: "el-icon-ChatDotRound", affix: true, keepAlive: true },
       },
     ],
   },

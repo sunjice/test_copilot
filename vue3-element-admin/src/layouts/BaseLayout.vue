@@ -1,7 +1,7 @@
 <template>
   <div class="layout-root" :class="layoutClass">
     <div
-      v-if="showOverlay && isMobile && isSidebarOpen"
+      v-if="showOverlay && isSidebarOpen && (isMobile || desktopOverlay)"
       class="layout-root__overlay"
       @click="closeSidebar"
     />
@@ -15,11 +15,14 @@ import { useLayout } from "./composables/useLayout";
 
 withDefaults(
   defineProps<{
-    /** 移动端展开侧边栏时是否显示遮罩层（LeftLayout 需要，MixLayout 不需要） */
+    /** 展开侧边栏时是否显示遮罩层（移动端始终显示；桌面端由 desktopOverlay 控制，LeftLayout 需要，MixLayout 不需要） */
     showOverlay?: boolean;
+    /** 桌面端展开侧边栏时是否也显示遮罩层（抽屉式布局需要） */
+    desktopOverlay?: boolean;
   }>(),
   {
     showOverlay: true,
+    desktopOverlay: false,
   }
 );
 

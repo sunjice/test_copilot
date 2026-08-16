@@ -27,10 +27,10 @@ export const useAppStore = defineStore("app", () => {
   const sidebarStatus = useStorage(STORAGE_KEYS.SIDEBAR_STATUS, SidebarStatus.CLOSED);
 
   /**
-   * 侧边栏显示状态
+   * 侧边栏显示状态（默认折叠，点击顶部图标后才展开）
    */
   const sidebar = reactive({
-    opened: sidebarStatus.value === SidebarStatus.OPENED,
+    opened: false,
     withoutAnimation: false,
   });
 

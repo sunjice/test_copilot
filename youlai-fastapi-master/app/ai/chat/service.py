@@ -184,6 +184,38 @@ class MessageService:
         flag_modified(msg, "metadata_json")
         await self.db.flush()
 
+    async def update_card_metadata_by_seq(
+        self,
+        session_id: int,
+        msg_type: str,
+        card_seq: int | None,
+        metadata: dict,
+    ) -> None:
+        """按 card_seq 序号更新指定卡片的 metadata（多卡片并行时精确定位）。
+
+        若 card_seq 为空（旧面板/旧数据兼容），回退到最后一张卡片。
+        """
+        if card_seq is None:
+            return await self.update_last_card_metadata_by_type(session_id, msg_type, metadata)
+
+        result = await self.db.execute(
+            select(ChatMessage)
+            .where(
+                ChatMessage.session_id == session_id,
+                ChatMessage.msg_type == msg_type,
+            )
+            .order_by(ChatMessage.id.desc())
+        )
+        for msg in result.scalars().all():
+            md = msg.metadata_json or {}
+            if md.get("card_seq") == card_seq:
+                merged = dict(md)
+                merged.update(metadata)
+                msg.metadata_json = merged
+                flag_modified(msg, "metadata_json")
+                await self.db.flush()
+                return
+
     async def _auto_title(self, session_id: int, content: str):
         result = await self.db.execute(
             select(ChatSession.message_count).where(ChatSession.id == session_id)

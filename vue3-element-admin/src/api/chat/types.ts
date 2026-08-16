@@ -88,6 +88,13 @@ export interface ConfirmCreateTaskReq {
   suite_id: number
   case_ids?: number[] | null
   selected_option?: string | null
+  /** 卡片序号（多卡片并行时精确定位，缺省回退最后一张） */
+  card_seq?: number | null
+}
+
+/** 取消确认卡片请求（多卡片并行时可指定序号） */
+export interface CancelConfirmReq {
+  card_seq?: number | null
 }
 
 /** 更新卡片状态 */

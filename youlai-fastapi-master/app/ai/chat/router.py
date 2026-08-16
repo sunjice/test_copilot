@@ -18,7 +18,7 @@ from app.ai.chat.schemas import (
     SessionCreate, SessionUpdate, SessionVO,
     MessageSendReq, MessageVO,
     ContextSetReq, SkillInfoVO,
-    ConfirmCreateTaskReq, UpdateCardStatusReq,
+    ConfirmCreateTaskReq, UpdateCardStatusReq, CancelConfirmReq,
 )
 from app.ai.agent.skills.base import skill_registry
 from app.ai.chat.session_manager import SessionContext
@@ -186,14 +186,21 @@ async def send_message(
 @router.post("/sessions/{session_id}/cancel-confirm")
 async def cancel_confirm(
     session_id: int,
+    req: CancelConfirmReq | None = None,
     db: AsyncSession = Depends(get_db),
     user: SysUserDetails = Depends(get_current_user),
 ):
-    """用户取消 confirm_card 创建任务，回写消息状态。"""
+    """用户取消 confirm_card 创建任务，回写消息状态（多卡片时可指定 card_seq）。"""
     usecase = ChatUseCase(db)
     # 校验会话所有权
     await usecase.get_session(session_id, user_id=_get_owner_id(user))
-    await usecase.update_last_confirm_card_metadata(session_id, {"confirm_status": "cancelled"})
+    card_seq = req.card_seq if req else None
+    await usecase.update_card_metadata_by_seq(
+        session_id,
+        "confirm_card",
+        card_seq,
+        {"confirm_status": "cancelled"},
+    )
     return Result(data=None, msg="已取消")
 
 
@@ -296,11 +303,16 @@ async def confirm_create_task(
         },
     )
 
-    # 回写 confirm_card 消息的 metadata_json，标记已确认
+    # 回写 confirm_card 消息的 metadata_json，标记已确认（多卡片时按 card_seq 精确定位）
     confirm_meta: dict = {"confirm_status": "confirmed"}
     if req.selected_option:
         confirm_meta["_selected_option"] = req.selected_option
-    await usecase.update_last_confirm_card_metadata(session_id, confirm_meta)
+    await usecase.update_card_metadata_by_seq(
+        session_id,
+        "confirm_card",
+        req.card_seq,
+        confirm_meta,
+    )
 
     return Result(data={
         "task_id": task_vo.id,

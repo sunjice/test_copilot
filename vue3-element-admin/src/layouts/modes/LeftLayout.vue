@@ -1,9 +1,9 @@
 <template>
-  <BaseLayout>
+  <BaseLayout :desktop-overlay="true">
     <div
       v-show="!appStore.contentFullscreen"
       class="layout-sidebar"
-      :class="{ 'is-collapsed': !isSidebarOpen }"
+      :class="{ 'is-sidebar-open': isSidebarOpen }"
     >
       <div :class="{ 'has-logo': showLogo }" class="layout-sidebar__inner">
         <LayoutLogo v-if="showLogo" :collapse="!isSidebarOpen" />
@@ -15,10 +15,7 @@
 
     <div
       class="layout-main"
-      :class="{
-        'is-collapsed': !isSidebarOpen,
-        'is-fullscreen': appStore.contentFullscreen,
-      }"
+      :class="{ 'is-fullscreen': appStore.contentFullscreen }"
     >
       <LayoutNavbar v-show="!appStore.contentFullscreen" />
       <LayoutTagsView v-if="showTagsView" />
@@ -49,13 +46,14 @@ const appStore = useAppStore();
   top: 0;
   bottom: 0;
   left: 0;
-  z-index: 999;
+  z-index: 1000;
   width: $sidebar-width;
   background-color: $menu-background;
-  transition: width 0.28s;
+  transform: translateX(-100%);
+  transition: transform 0.28s;
 
-  &.is-collapsed {
-    width: $sidebar-width-collapsed;
+  &.is-sidebar-open {
+    transform: translateX(0);
   }
 
   &__inner {
@@ -63,7 +61,6 @@ const appStore = useAppStore();
     height: 100%;
     background-color: var(--menu-background);
     border-right: 1px solid var(--card-border);
-    transition: width 0.28s;
 
     &.has-logo {
       .el-scrollbar {
@@ -80,40 +77,11 @@ const appStore = useAppStore();
 .layout-main {
   position: relative;
   height: 100%;
-  margin-left: $sidebar-width;
+  margin-left: 0;
   overflow-y: auto;
   transition: margin-left 0.28s;
 
-  &.is-collapsed {
-    margin-left: $sidebar-width-collapsed;
-  }
-
   &.is-fullscreen {
-    margin-left: 0 !important;
-  }
-}
-
-.is-mobile {
-  .layout-sidebar {
-    width: $sidebar-width !important;
-    transition:
-      transform 0.28s,
-      width 0s;
-  }
-
-  &.is-sidebar-collapsed {
-    .layout-sidebar {
-      transform: translateX(-$sidebar-width);
-    }
-  }
-
-  &.is-sidebar-open {
-    .layout-sidebar {
-      transform: translateX(0);
-    }
-  }
-
-  .layout-main {
     margin-left: 0 !important;
   }
 }

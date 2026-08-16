@@ -93,6 +93,12 @@ class ConfirmCreateTaskReq(BaseModel):
     suite_id: int = Field(..., description="模块ID")
     case_ids: list[int] | None = Field(default=None, description="指定用例ID列表，为空则处理整个模块")
     selected_option: str | None = Field(default=None, description="用户选中的选项ID")
+    card_seq: int | None = Field(default=None, description="卡片序号（多卡片并行时精确定位，缺省回退最后一张）")
+
+
+class CancelConfirmReq(BaseModel):
+    """取消确认卡片（多卡片并行时可指定具体序号）。"""
+    card_seq: int | None = Field(default=None, description="卡片序号（缺省回退最后一张）")
 
 
 # ═══════════════ 用量日志 ═══════════════

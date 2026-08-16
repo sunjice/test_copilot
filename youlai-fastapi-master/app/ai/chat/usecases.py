@@ -50,6 +50,15 @@ class ChatUseCase:
     async def update_last_card_metadata_by_type(self, session_id: int, msg_type: str, metadata: dict) -> None:
         return await self.message.update_last_card_metadata_by_type(session_id, msg_type, metadata)
 
+    async def update_card_metadata_by_seq(
+        self,
+        session_id: int,
+        msg_type: str,
+        card_seq: int | None,
+        metadata: dict,
+    ) -> None:
+        return await self.message.update_card_metadata_by_seq(session_id, msg_type, card_seq, metadata)
+
     async def add_message(
         self,
         session_id: int,
@@ -89,9 +98,9 @@ class ChatUseCase:
         trace_id = make_trace_id("chat", session_id)
         context.working["trace_id"] = trace_id
 
-        assistant_content = ""
-        assistant_msg_type = "text"
-        metadata: dict = {}
+        # 收集所有 message 事件（多任务并行时每条卡片消息独立入库，避免互相覆盖）
+        assistant_messages: list[tuple[str, str, dict]] = []
+        current_event = ""
 
         try:
             stream = chat_orchestrator.process_message(
@@ -101,25 +110,28 @@ class ChatUseCase:
                 yield sse
 
                 for line in sse.splitlines():
-                    if line.startswith("data: "):
+                    if line.startswith("event: "):
+                        current_event = line[7:].strip()
+                    elif line.startswith("data: "):
                         try:
                             data = json.loads(line[6:].strip())
-                            if isinstance(data, dict):
-                                if "content" in data:
-                                    assistant_content = data["content"]
-                                if "msg_type" in data:
-                                    assistant_msg_type = data["msg_type"]
-                                if "metadata" in data and data["metadata"]:
-                                    metadata = data["metadata"]
+                            if isinstance(data, dict) and current_event == "message":
+                                content = data.get("content", "")
+                                if content:
+                                    assistant_messages.append((
+                                        content,
+                                        data.get("msg_type", "text"),
+                                        data.get("metadata") or {},
+                                    ))
                         except (json.JSONDecodeError, KeyError):
                             pass
 
-            if assistant_content:
+            for content, msg_type, meta in assistant_messages:
                 await self.message.add_message(
                     session_id, "assistant",
-                    assistant_content,
-                    msg_type=assistant_msg_type,
-                    metadata=metadata,
+                    content,
+                    msg_type=msg_type,
+                    metadata=meta,
                 )
 
         except Exception as e:
@@ -130,14 +142,15 @@ class ChatUseCase:
             )
             yield f"event: error\ndata: {json.dumps({'message': str(e)}, ensure_ascii=False)}\n\n"
 
-        tokens = metadata.get("tokens", {})
+        last_meta = assistant_messages[-1][2] if assistant_messages else {}
+        tokens = last_meta.get("tokens", {})
         if tokens:
             await self.usage.log_usage(
                 module="chat",
                 model=ai_config.model if ai_config else "unknown",
                 prompt_tokens=tokens.get("prompt", 0),
                 completion_tokens=tokens.get("completion", 0),
-                duration_ms=metadata.get("duration_ms", 0),
+                duration_ms=last_meta.get("duration_ms", 0),
                 session_id=session_id,
             )
 

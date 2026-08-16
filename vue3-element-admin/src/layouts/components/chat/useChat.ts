@@ -222,8 +222,16 @@ export function useChat() {
       let draftType: string | undefined
       let draftData: Record<string, any> | undefined
       let skillName: string | undefined
-      let messageMetadata: Record<string, any> = {}
-      let draftId: number | null = null
+      const draftId: number | null = null
+      // 收集所有 message 事件（多卡片并行时每条独立展示，避免互相覆盖）
+      const collectedMessages: Array<{
+        content: string
+        msg_type: ChatMessage["msg_type"]
+        draft_type?: string
+        draft_data?: Record<string, any>
+        skill_name?: string
+        metadata: Record<string, any>
+      }> = []
 
       while (true) {
         const { done, value } = await reader.read()
@@ -289,7 +297,15 @@ export function useChat() {
                   if (data.draft_type) draftType = data.draft_type
                   if (data.draft_data) draftData = data.draft_data
                   if (data.skill_name) skillName = data.skill_name
-                  if (data.metadata) messageMetadata = data.metadata
+                  // 收集所有 message 事件（多卡片并行时每条独立 addLocalMessage，避免互相覆盖）
+                  collectedMessages.push({
+                    content: data.content || "",
+                    msg_type: (data.msg_type || "text") as ChatMessage["msg_type"],
+                    draft_type: data.draft_type,
+                    draft_data: data.draft_data,
+                    skill_name: data.skill_name || skillName,
+                    metadata: data.metadata || {},
+                  })
                   break
 
                 case "error":
@@ -310,7 +326,8 @@ export function useChat() {
       // SSE 流已结束，先关闭 streaming 占位符，再 push 真消息
       streaming.value = false
 
-      // 把 segments 序列化到 metadata（文字/卡片消息都保留，避免卡片消息丢失流式前置文字）
+      // 把本地拼的 segments 序列化（后端 message 事件未携带 segments 时的兜底）
+      const localSegmentMeta: Record<string, any> = {}
       if (segments.value.length) {
         // 流已结束，给未结算的思考区块补上 durationMs
         const now = performance.now()
@@ -337,20 +354,58 @@ export function useChat() {
           .filter((s): s is Segment & { type: "tool" } => s.type === "tool")
           .map((s) => s.name)
 
-        messageMetadata = {
-          ...messageMetadata,
-          segments: JSON.parse(JSON.stringify(merged)),
-          tool_names: toolNames,
-          tool_calls: toolNames.length,
-        }
-        if (!messageMetadata.skill_name && skillName) {
-          messageMetadata.skill_name = skillName
-        }
+        localSegmentMeta.segments = JSON.parse(JSON.stringify(merged))
+        localSegmentMeta.tool_names = toolNames
+        localSegmentMeta.tool_calls = toolNames.length
       }
 
-      // 添加助手消息
-      if (assistantContent || segments.value.some(s => s.type === "text" && s.content)) {
-        // 从 segments 中提取纯文本拼接
+      // 添加助手消息：多卡片并行时逐条添加，互不覆盖
+      if (collectedMessages.length > 0) {
+        for (const cm of collectedMessages) {
+          const meta: Record<string, any> = { ...(cm.metadata || {}) }
+          // 后端 message 事件已带 segments（agent 路径）→ 优先使用；否则用本地拼的兜底
+          if (!meta.segments && Object.keys(localSegmentMeta).length > 0) {
+            Object.assign(meta, localSegmentMeta)
+          }
+          if (!meta.skill_name && (cm.skill_name || skillName)) {
+            meta.skill_name = cm.skill_name || skillName
+          }
+
+          const assistantMsg: ChatMessage = {
+            id: null,
+            session_id: sessionId,
+            role: "assistant",
+            msg_type: cm.msg_type,
+            content: cm.content,
+            metadata_json: Object.keys(meta).length > 0
+              ? meta
+              : (cm.skill_name || skillName)
+                ? { skill_name: cm.skill_name || skillName }
+                : null,
+            draft_id: draftId,
+            create_time: new Date().toISOString(),
+          }
+          addLocalMessage(assistantMsg)
+
+          // 如果有草稿数据，打开草稿面板（多草稿时取最后一个）
+          if (cm.draft_type && cm.draft_data) {
+            activeDraft.value = {
+              id: null,
+              session_id: sessionId,
+              message_id: null,
+              draft_type: cm.draft_type,
+              title: cm.draft_type,
+              content_json: cm.draft_data,
+              status: "pending",
+              confirmed_by: null,
+              confirmed_at: null,
+              create_time: null,
+            }
+            showDraftPanel.value = true
+          }
+        }
+      } else if (assistantContent || segments.value.some(s => s.type === "text" && s.content)) {
+        // 无 message 事件（兜底）：从 segments 中提取纯文本拼接
         const textFromSegments = segments.value
           .filter((s): s is Segment & { type: "text" } => s.type === "text")
           .map((s) => s.content)
@@ -362,8 +417,8 @@ export function useChat() {
           role: "assistant",
           msg_type: assistantMsgType,
           content: assistantContent || textFromSegments,
-          metadata_json: Object.keys(messageMetadata).length > 0
-            ? messageMetadata
+          metadata_json: Object.keys(localSegmentMeta).length > 0
+            ? localSegmentMeta
             : skillName
               ? { skill_name: skillName }
               : null,
@@ -626,6 +681,7 @@ export function useChat() {
     const suiteId = metadata.suite_id
     const caseIds: number[] | undefined = metadata.case_ids ?? undefined
     const selectedOption = metadata._selected_option as string | undefined
+    const cardSeq = (metadata.card_seq as number | null | undefined) ?? null
 
     try {
       const res = await ChatTaskAPI.confirmCreate(sessionId, {
@@ -634,6 +690,7 @@ export function useChat() {
         suite_id: suiteId,
         case_ids: caseIds ?? null,
         selected_option: selectedOption ?? null,
+        card_seq: cardSeq,
       })
 
       const taskId = res.task_id
@@ -664,8 +721,8 @@ export function useChat() {
       }
       messages.value.push(taskMsg)
 
-      // 回写本地 confirm_card 消息的 metadata_json，标记已确认
-      updateLastUnconfirmedCardInMessages("confirmed", selectedOption)
+      // 回写本地 confirm_card 消息的 metadata_json，标记已确认（按 card_seq 精确定位）
+      updateCardStatusInMessages(cardSeq, "confirmed", selectedOption)
 
       await loadSessions()
 
@@ -683,25 +740,27 @@ export function useChat() {
 
   async function cancelTask(_metadata: Record<string, any>) {
     if (!activeSessionId.value) return
+    const cardSeq = (_metadata.card_seq as number | null | undefined) ?? null
     try {
-      await ChatMessageAPI.cancelConfirm(activeSessionId.value)
-      updateLastUnconfirmedCardInMessages("cancelled")
+      await ChatMessageAPI.cancelConfirm(activeSessionId.value, { card_seq: cardSeq })
+      updateCardStatusInMessages(cardSeq, "cancelled")
     } catch {
       // 静默处理
     }
     ElMessage.info("已取消创建")
   }
 
-  /** 找到 messages 中最后一条未处理的 confirm_card，更新其 metadata_json */
-  function updateLastUnconfirmedCardInMessages(status: string, selectedOption?: string) {
+  /** 找到 messages 中对应的 confirm_card（card_seq 为空时回退到最后一条未处理），更新其 metadata_json */
+  function updateCardStatusInMessages(cardSeq: number | null, status: string, selectedOption?: string) {
     for (let i = messages.value.length - 1; i >= 0; i--) {
       const m = messages.value[i]
-      if (m.msg_type === "confirm_card" && !m.metadata_json?.confirm_status) {
-        const meta: Record<string, any> = { ...(m.metadata_json || {}), confirm_status: status }
-        if (selectedOption) meta._selected_option = selectedOption
-        messages.value[i] = { ...m, metadata_json: meta }
-        break
-      }
+      if (m.msg_type !== "confirm_card" || m.metadata_json?.confirm_status) continue
+      // 指定了 card_seq 时必须精确匹配；未指定时取最后一条未处理的（兼容旧数据）
+      if (cardSeq != null && m.metadata_json?.card_seq !== cardSeq) continue
+      const meta: Record<string, any> = { ...(m.metadata_json || {}), confirm_status: status }
+      if (selectedOption) meta._selected_option = selectedOption
+      messages.value[i] = { ...m, metadata_json: meta }
+      break
     }
   }
 

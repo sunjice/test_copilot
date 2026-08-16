@@ -13,6 +13,7 @@ import type {
   ContextSetReq,
   SkillInfo,
   ConfirmCreateTaskReq,
+  CancelConfirmReq,
   UpdateCardStatusReq,
 } from "./types"
 
@@ -89,11 +90,12 @@ export const ChatMessageAPI = {
     })
   },
 
-  /** 取消 confirm_card 确认 */
-  cancelConfirm(sessionId: number) {
+  /** 取消 confirm_card 确认（多卡片并行时可指定 card_seq） */
+  cancelConfirm(sessionId: number, data?: CancelConfirmReq) {
     return request({
       url: `/api/v1/aitc/chat/sessions/${sessionId}/cancel-confirm`,
       method: "post",
+      data,
     })
   },
 
