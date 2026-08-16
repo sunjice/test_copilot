@@ -226,24 +226,20 @@
 </template>
 
 <script setup lang="ts">
-import { ref, shallowRef, watch, nextTick, computed, onMounted } from "vue"
+import { ref, watch, nextTick, computed, onMounted } from "vue"
 import { useRouter } from "vue-router"
-import { ElMessage, ElMessageBox } from "element-plus"
-import type { ChatMessage as ChatMessageType } from "@/api/chat/types"
 import {
   ChatDotRound, Plus, Promotion, ArrowLeft, ArrowDown, Clock, Delete, Search, Edit,
-  FolderChecked, DocumentChecked, EditPen, View,
-  Grid, Opportunity, Collection, Location, Close, VideoPause,
+  Location, Close, VideoPause,
 } from "@element-plus/icons-vue"
 import ChatMessage from "@/layouts/components/chat/ChatMessage.vue"
 import TaskListPanel from "@/layouts/components/chat/TaskListPanel.vue"
 import StreamingBubble from "@/layouts/components/chat/StreamingBubble.vue"
 import { useChat } from "@/layouts/components/chat/useChat"
+import { useChatPanel } from "@/layouts/components/chat/useChatPanel"
 import { useInputResize } from "@/layouts/components/chat/useChatResize"
 import { formatHistoryTime } from "@/layouts/components/chat/utils"
 import { useAiContextStore } from "@/stores/aiContext"
-import { TASK_TYPE_MAP } from "@/views/aitc/constants"
-import type { ChatSession, SkillInfo } from "@/api/chat/types"
 
 const text = ref("")
 const msgListRef = ref<HTMLElement>()
@@ -271,6 +267,26 @@ const {
   init,
 } = useChat()
 
+// ── 聊天主体公共逻辑（历史面板/命令补全/发送/上下文/快捷卡片/会话操作/滚动） ──
+const {
+  showHistory, historyKeyword, filteredSessions, groupedSessions,
+  onHistorySelect, onRenameSession, onDeleteSession, onDeleteAll,
+  inputRef, slashIndex, slashKeyword, filteredSkills, showSlashPanel,
+  skillLabel, onSlashSelect, onKeydown,
+  send, onStop, onRetry,
+  showContextBar, welcomeTitle, contextBarItems, inputPlaceholder,
+  quickActions, onQuickSend,
+  newSession,
+  onViewDraft, onConfirmDraft, onConfirmTask, onCancelTask, onSubmitClarify,
+  userScrolledUp, showScrollBottom, onMsgScroll, scrollToBottom,
+} = useChatPanel({
+  sessions, activeSessionId, messages, skills, streaming, segments, pageContext,
+  createSession, selectSession, updateSession, deleteSession,
+  sendMessage, stopGeneration, retryLastMessage, confirmDraft, confirmCreateTask, cancelTask,
+  submitClarifyAnswers, viewDraft,
+  text, msgListRef,
+})
+
 // 是否有任务（消息 parts 里的 confirm_card part 带 task_id，或 task_card 消息）
 const hasTasks = computed(() =>
   messages.value.some((m) => {
@@ -280,7 +296,7 @@ const hasTasks = computed(() =>
   })
 )
 
-// ── 会话持久化（切页面后恢复到上次会话，保持消息和滚动位置） ──
+// ── 会话持久化（切页面后恢复到上次会话） ──
 const SESSION_KEY = "ai-chat-active-session-id"
 
 function persistSessionId(id: number | null) {
@@ -301,20 +317,35 @@ function restoreSessionId(): number | null {
   }
 }
 
-// 监听会话切换，持久化
 watch(activeSessionId, (id) => persistSessionId(id))
+
+// ── 滚动位置缓存（keep-alive 场景） ──
+const savedScrollTop = ref<number | null>(null)
+
+function saveScrollPosition() {
+  const el = msgListRef.value
+  if (el) savedScrollTop.value = el.scrollTop
+}
+
+function restoreScrollPosition() {
+  const el = msgListRef.value
+  if (!el) return
+  if (savedScrollTop.value != null) {
+    el.scrollTop = savedScrollTop.value
+  } else {
+    el.scrollTop = el.scrollHeight
+  }
+}
 
 // ── 初始化 ──
 onMounted(async () => {
   await init()
-  // 恢复上次会话：优先 sessionStorage 记住的会话，其次第一个会话
   const savedId = restoreSessionId()
   if (savedId != null && sessions.value.some((s) => s.id === savedId)) {
     await selectSession(savedId)
   } else if (sessions.value.length > 0) {
     await selectSession(sessions.value[0].id!)
   }
-  // 加载完成后滚到底部
   await nextTick()
   scrollToBottom()
 })
@@ -322,9 +353,7 @@ onMounted(async () => {
 // 暴露滚动方法，供父组件在 keep-alive 激活时调用
 defineExpose({ scrollToBottom, restoreScrollPosition, saveScrollPosition })
 
-// ── 同步上下文到 pageContext（与 LayoutChat 一致：从 aiContextStore 读取） ──
-// index.vue 在工作区选择变化时已调用 aiContextStore.register/update，
-// 这里监听 contextJson 变化，注入到 useChat 的 pageContext
+// ── 同步上下文到 pageContext（从 aiContextStore 读取） ──
 const aiContextStore = useAiContextStore()
 watch(
   () => aiContextStore.contextJson,
@@ -345,384 +374,6 @@ function onViewTask(taskId: number) {
     router.push("/aitc/tasks")
   }
 }
-
-// ── 历史面板 ──
-const showHistory = ref(false)
-const historyKeyword = ref("")
-
-const filteredSessions = computed(() => {
-  if (!historyKeyword.value.trim()) return sessions.value
-  const k = historyKeyword.value.trim().toLowerCase()
-  return sessions.value.filter((s) => s.title?.toLowerCase().includes(k))
-})
-
-const groupedSessions = computed(() => {
-  const groups: { label: string; sessions: ChatSession[] }[] = []
-  const now = new Date()
-  now.setHours(0, 0, 0, 0)
-  const yesterday = new Date(now)
-  yesterday.setDate(yesterday.getDate() - 1)
-  const weekAgo = new Date(now)
-  weekAgo.setDate(weekAgo.getDate() - 7)
-  const monthAgo = new Date(now)
-  monthAgo.setMonth(monthAgo.getMonth() - 1)
-
-  const today: ChatSession[] = []
-  const yday: ChatSession[] = []
-  const week: ChatSession[] = []
-  const month: ChatSession[] = []
-  const earlier: ChatSession[] = []
-
-  for (const s of filteredSessions.value) {
-    const t = s.update_time ? new Date(s.update_time) : null
-    if (!t) { earlier.push(s); continue }
-    const d = new Date(t); d.setHours(0, 0, 0, 0)
-    if (d.getTime() === now.getTime()) today.push(s)
-    else if (d.getTime() === yesterday.getTime()) yday.push(s)
-    else if (d.getTime() > weekAgo.getTime()) week.push(s)
-    else if (d.getTime() > monthAgo.getTime()) month.push(s)
-    else earlier.push(s)
-  }
-
-  if (today.length) groups.push({ label: "今天", sessions: today })
-  if (yday.length) groups.push({ label: "昨天", sessions: yday })
-  if (week.length) groups.push({ label: "最近7天", sessions: week })
-  if (month.length) groups.push({ label: "最近30天", sessions: month })
-  if (earlier.length) groups.push({ label: "更早", sessions: earlier })
-  return groups
-})
-
-function onHistorySelect(sessionId: number) {
-  showHistory.value = false
-  selectSession(sessionId)
-}
-
-async function onRenameSession(s: ChatSession) {
-  try {
-    const { value } = await ElMessageBox.prompt("请输入新名称", "重命名对话", {
-      confirmButtonText: "确定",
-      cancelButtonText: "取消",
-      inputValue: s.title,
-      inputPlaceholder: "对话名称",
-    })
-    if (value && value.trim() && value.trim() !== s.title) {
-      await updateSession(s.id!, { title: value.trim() })
-    }
-  } catch {
-    // 取消
-  }
-}
-
-// ── 危险确认弹窗（复用） ──
-async function confirmDanger(message: string): Promise<boolean> {
-  try {
-    await ElMessageBox.confirm(message, "确认删除", {
-      type: "warning",
-      confirmButtonText: "删除",
-      cancelButtonText: "取消",
-    })
-    return true
-  } catch {
-    return false
-  }
-}
-
-async function onDeleteSession(s: ChatSession) {
-  if (!(await confirmDanger(`确定删除"${s.title}"？此操作不可恢复。`))) return
-  if (activeSessionId.value === s.id) {
-    const rest = sessions.value.filter((x) => x.id !== s.id)
-    if (rest.length) await selectSession(rest[0].id!)
-  }
-  await deleteSession(s.id!)
-  ElMessage.success("已删除")
-}
-
-async function onDeleteAll() {
-  if (!sessions.value.length) return
-  if (!(await confirmDanger("确定删除所有历史对话？此操作不可恢复。"))) return
-  const ids = sessions.value.map((s) => s.id).filter((id): id is number => !!id)
-  await Promise.all(ids.map((id) => deleteSession(id)))
-  ElMessage.success("已删除所有历史对话")
-  showHistory.value = false
-}
-
-// ── 发送消息 ──
-async function send() {
-  const val = text.value.trim()
-  if (!val || streaming.value) return
-  text.value = ""
-  slashClosed.value = false
-
-  await sendMessage(val)
-}
-
-// ── "/" 命令补全 ──
-const inputRef = ref()
-const slashIndex = ref(0)
-const slashClosed = ref(false) // Esc 关闭后，在清空/换行前不再弹出
-
-/** 正在输入的命令关键词（仅当输入以 / 开头且未输入空格时有效） */
-const slashKeyword = computed(() => {
-  const t = text.value
-  if (!t.startsWith("/")) return null
-  const cmd = t.slice(1)
-  if (/\s/.test(cmd)) return null
-  return cmd.toLowerCase()
-})
-
-const filteredSkills = computed(() => {
-  const kw = slashKeyword.value
-  if (kw === null) return []
-  return skills.value.filter((s) => s.name.toLowerCase().startsWith(kw))
-})
-
-const showSlashPanel = computed(
-  () => slashKeyword.value !== null && !slashClosed.value && !streaming.value
-)
-
-watch(slashKeyword, () => {
-  slashIndex.value = 0
-})
-
-watch(text, (v) => {
-  // 文本不再以 / 开头时，重置 Esc 关闭状态
-  if (!v.startsWith("/")) slashClosed.value = false
-})
-
-/** 技能命令 → 中文标签（优先使用更完整的描述） */
-const SKILL_LABELS: Record<string, string> = {
-  core_select: "挑选核心用例",
-  case_review: "审核用例质量",
-  script_gen: "生成测试脚本",
-  case_complete: "完善测试用例",
-  case_design: "设计测试用例",
-}
-
-function skillLabel(name: string): string {
-  return SKILL_LABELS[name] || TASK_TYPE_MAP[name]?.label || name
-}
-
-function onSlashSelect(s: SkillInfo) {
-  text.value = `/${s.name} `
-  slashClosed.value = false
-  nextTick(() => inputRef.value?.focus())
-}
-
-function onKeydown(e: Event | KeyboardEvent) {
-  if (!(e instanceof KeyboardEvent)) return
-  // "/" 命令面板键盘导航
-  if (showSlashPanel.value && filteredSkills.value.length) {
-    if (e.key === "ArrowDown") {
-      e.preventDefault()
-      slashIndex.value = (slashIndex.value + 1) % filteredSkills.value.length
-      return
-    }
-    if (e.key === "ArrowUp") {
-      e.preventDefault()
-      slashIndex.value = (slashIndex.value - 1 + filteredSkills.value.length) % filteredSkills.value.length
-      return
-    }
-    if (e.key === "Enter" || e.key === "Tab") {
-      e.preventDefault()
-      onSlashSelect(filteredSkills.value[slashIndex.value])
-      return
-    }
-    if (e.key === "Escape") {
-      slashClosed.value = true
-      return
-    }
-  }
-  if (e.key === "Enter" && !e.shiftKey) {
-    e.preventDefault()
-    send()
-  }
-}
-
-// ── 停止生成 ──
-function onStop() {
-  stopGeneration()
-}
-
-// ── 重试 ──
-async function onRetry() {
-  await retryLastMessage()
-}
-
-// ── 上下文显示行 ──
-const showContextBar = ref(true)
-
-const welcomeTitle = computed(() => "有什么我能帮你的吗？")
-
-interface ContextItem {
-  label: string
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  icon?: any
-}
-
-const contextBarItems = computed<ContextItem[]>(() => {
-  const ctx = pageContext.value || {}
-  const page = ctx.current_page || ""
-  if (!page) return []
-
-  const items: ContextItem[] = []
-
-  // 公共字段：项目、模块、用例
-  if (ctx.project_name || ctx.project_id) {
-    items.push({ label: ctx.project_name || `项目 #${ctx.project_id}`, icon: FolderChecked })
-  }
-  if (ctx.suite_name || ctx.suite_id) {
-    items.push({ label: ctx.suite_name || `模块 #${ctx.suite_id}`, icon: Collection })
-  }
-  if (ctx.current_case_id) {
-    items.push({ label: `用例 #${ctx.current_case_id}`, icon: DocumentChecked })
-  }
-
-  // 页面特有字段
-  if (page === "case") {
-    if (ctx.selected_case_ids?.length) {
-      items.push({ label: `已选 ${ctx.selected_case_ids.length} 条用例`, icon: Grid })
-    }
-  } else {
-    if (ctx.task_id) items.push({ label: `任务 #${ctx.task_id}`, icon: Opportunity })
-    if (ctx.script_id) items.push({ label: `脚本 #${ctx.script_id}`, icon: DocumentChecked })
-  }
-
-  return items
-})
-
-const inputPlaceholder = computed(() => {
-  return `提问，或输入 "/" 触发任务命令`
-})
-
-// ── 快捷提问（Rovo 风格卡片） ──
-interface QuickAction {
-  title: string
-  desc: string
-  prompt: string
-  skill: string
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  icon: any
-  bg: string
-}
-
-const quickActions = shallowRef<QuickAction[]>([
-  {
-    title: "挑选核心用例",
-    desc: "从当前模块智能挑选最重要的用例",
-    prompt: "/core_select 帮我挑选核心用例",
-    skill: "core_select",
-    icon: Search,
-    bg: "linear-gradient(135deg, #e0f2fe 0%, #bae6fd 100%)",
-  },
-  {
-    title: "审核用例质量",
-    desc: "检查字段完整性和步骤规范性",
-    prompt: "/case_review 审核用例质量",
-    skill: "case_review",
-    icon: View,
-    bg: "linear-gradient(135deg, #dcfce7 0%, #bbf7d0 100%)",
-  },
-  {
-    title: "完善测试用例",
-    desc: "自动补全用例的缺失字段和测试步骤",
-    prompt: "/case_complete 完善测试用例",
-    skill: "case_complete",
-    icon: EditPen,
-    bg: "linear-gradient(135deg, #ffedd5 0%, #fed7aa 100%)",
-  },
-])
-
-async function onQuickSend(action: QuickAction) {
-  if (streaming.value) return
-  await sendMessage(action.prompt, action.skill)
-}
-
-// ── 会话操作 ──
-async function newSession() {
-  const s = await createSession()
-  await selectSession(s.id!)
-}
-
-// ── 草稿操作 ──
-function onViewDraft(id: number) {
-  viewDraft(id)
-}
-
-async function onConfirmDraft(action: string) {
-  await confirmDraft(action as "confirm" | "discard")
-}
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function onConfirmTask(metadata: Record<string, any>) {
-  confirmCreateTask(metadata)
-}
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function onCancelTask(metadata: Record<string, any>) {
-  cancelTask(metadata)
-}
-
-// ── 澄清卡片提交：将答案作为新消息发送给 LLM，并持久化答案状态 ──
-async function onSubmitClarify(text: string, answers: Record<string, string>) {
-  await sendMessage(text)
-  submitClarifyAnswers(answers)
-}
-
-// ── 滚动控制 ──
-const userScrolledUp = ref(false)
-const showScrollBottom = ref(false)
-// 滚动位置缓存（keep-alive 场景下，切走前保存，切回后恢复，保留用户停留的位置）
-const savedScrollTop = ref<number | null>(null)
-
-function onMsgScroll() {
-  const el = msgListRef.value
-  if (!el) return
-  const dist = el.scrollHeight - el.scrollTop - el.clientHeight
-  userScrolledUp.value = dist > 80
-  showScrollBottom.value = dist > 120
-}
-
-function scrollToBottom() {
-  const el = msgListRef.value
-  if (!el) return
-  el.scrollTop = el.scrollHeight
-  userScrolledUp.value = false
-  showScrollBottom.value = false
-}
-
-/** 保存当前滚动位置（切走前调用） */
-function saveScrollPosition() {
-  const el = msgListRef.value
-  if (el) savedScrollTop.value = el.scrollTop
-}
-
-/** 恢复滚动位置（切回后调用） */
-function restoreScrollPosition() {
-  const el = msgListRef.value
-  if (!el) return
-  if (savedScrollTop.value != null) {
-    el.scrollTop = savedScrollTop.value
-  } else {
-    el.scrollTop = el.scrollHeight
-  }
-}
-
-// 自动滚动（用户没有手动上翻时）
-const lastSegContentLen = computed(() => {
-  const last = segments.value[segments.value.length - 1]
-  if (!last) return 0
-  return (last.type === "text" || last.type === "thinking") ? last.content.length : 0
-})
-
-watch(
-  () => [messages.value.length, segments.value.length, lastSegContentLen.value],
-  async () => {
-    await nextTick()
-    if (!userScrolledUp.value && msgListRef.value) {
-      msgListRef.value.scrollTop = msgListRef.value.scrollHeight
-    }
-  }
-)
 
 // ── 输入区拖高 ──
 const { inputHeight, onInputMouseDown } = useInputResize()
