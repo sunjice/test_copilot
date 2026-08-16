@@ -19,19 +19,30 @@
 
     <!-- 右侧对话区 -->
     <div class="ai-chat-main">
-      <ChatPanel />
+      <ChatPanel ref="chatPanelRef" />
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onUnmounted, onBeforeUnmount } from "vue"
+import { ref, onUnmounted, onBeforeUnmount, onActivated, onDeactivated, nextTick } from "vue"
 import { DArrowLeft, DArrowRight } from "@element-plus/icons-vue"
 import WorkspacePanel from "./workspace/WorkspacePanel.vue"
 import ChatPanel from "./chat/ChatPanel.vue"
 import { useAiContextStore } from "@/stores/aiContext"
 
 const aiContextStore = useAiContextStore()
+const chatPanelRef = ref<InstanceType<typeof ChatPanel> | null>(null)
+
+// keep-alive 场景：切走时保存滚动位置，切回时恢复（保留用户停留的位置）
+onDeactivated(() => {
+  chatPanelRef.value?.saveScrollPosition()
+})
+onActivated(() => {
+  nextTick(() => {
+    chatPanelRef.value?.restoreScrollPosition()
+  })
+})
 
 // ── 工作区折叠 ──
 const workspaceCollapsed = ref(false)

@@ -24,8 +24,16 @@
     <!-- AI 消息：通栏排版，无气泡底色 -->
     <template v-else>
       <div class="msg-content">
-        <!-- 时间线：有 segments 时统一渲染（卡片消息也保留流式阶段的打字机文字） -->
-        <TurnRenderer v-if="hasSegments" :segments="metadataSegments" />
+        <!-- 时间线：有 parts 时统一渲染（卡片 part 也由 TurnRenderer 渲染） -->
+        <TurnRenderer
+          v-if="hasSegments"
+          :segments="metadataSegments"
+          @confirm-task="handleConfirmTaskPart"
+          @cancel-task="handleCancelTaskPart"
+          @view-task="handleViewTaskPart"
+          @submit-clarify="handleClarifySubmitPart"
+          @cancel-clarify="handleClarifyCancelPart"
+        />
 
         <!-- 纯文本消息（无 segments 时兜底展示，有 segments 时由 TurnRenderer 渲染，隐藏避免重复） -->
         <div v-if="msg.msg_type === 'text'" class="msg-text" v-html="renderedContent" v-show="!hasSegments" />
@@ -134,44 +142,7 @@
             </div>
           </div>
 
-          <!-- 确认卡片（任务创建前确认，支持多选项） -->
-          <div v-else-if="msg.msg_type === 'confirm_card'" class="msg-card">
-            <div class="msg-text" v-html="renderedContent" />
-
-            <!-- 多选项（如审核范围选择） -->
-            <div v-if="confirmOptions.length > 0 && confirmState === 'idle'" class="confirm-options">
-              <div
-                v-for="opt in confirmOptions"
-                :key="opt.id"
-                class="confirm-option"
-                :class="{ selected: selectedOptionId === opt.id }"
-                @click="selectedOptionId = opt.id"
-              >
-                <span class="option-radio">
-                  <span v-if="selectedOptionId === opt.id" class="radio-dot" />
-                </span>
-                <span class="option-label">{{ opt.label }}</span>
-                <span v-if="opt.description" class="option-desc">{{ opt.description }}</span>
-              </div>
-            </div>
-
-            <div v-if="confirmState === 'idle'" class="card-actions">
-              <el-button size="small" type="primary" :loading="confirming" @click="handleConfirm">
-                确认创建
-              </el-button>
-              <el-button size="small" plain @click="handleCancel">
-                取消
-              </el-button>
-            </div>
-            <div v-else-if="confirmState === 'confirmed'" class="card-result success">
-              任务已创建
-            </div>
-            <div v-else class="card-result muted">
-              已取消
-            </div>
-          </div>
-
-          <!-- 其他类型直接渲染文本 -->
+          <!-- 其他类型直接渲染文本（confirm_card 已内嵌为 part，由 TurnRenderer 渲染） -->
           <div v-else class="msg-text" v-html="renderedContent" />
 
           <!-- Agent 工具调用记录：可折叠思考过程（旧数据兼容，无 segments 时使用） -->
@@ -230,7 +201,7 @@ import { ElMessage } from "element-plus"
 import { Check, Tools, WarningFilled, DocumentCopy, Refresh, Select, Close } from "@element-plus/icons-vue"
 import { renderMarkdown, formatTimeHM, setupCodeCopy, exportTableToExcel } from "./utils"
 import TurnRenderer from "./TurnRenderer.vue"
-import type { ChatMessage, Segment } from "@/api/chat/types"
+import type { ChatMessage, Part, ConfirmCardData } from "@/api/chat/types"
 
 const props = defineProps<{
   msg: ChatMessage
@@ -242,6 +213,7 @@ const emit = defineEmits<{
   confirmTask: [metadata: Record<string, any>]
   cancelTask: [metadata: Record<string, any>]
   submitClarify: [text: string, answers: Record<string, string>]
+  viewTask: [taskId: number]
   retry: []
 }>()
 
@@ -345,54 +317,23 @@ function handleClarifySubmit() {
   emit("submitClarify", text, resolved)
 }
 
-/** 确认卡片中的多选项（如审核范围选择） */
-interface ConfirmOption {
-  id: string
-  label: string
-  description?: string
+// ── 确认卡片 part 事件转发（卡片由 TurnRenderer 里的 ConfirmCard 渲染） ──
+function handleConfirmTaskPart(card: ConfirmCardData) {
+  emit("confirmTask", card as unknown as Record<string, any>)
+}
+function handleCancelTaskPart(card: ConfirmCardData) {
+  emit("cancelTask", card as unknown as Record<string, any>)
+}
+function handleViewTaskPart(taskId: number) {
+  emit("viewTask", taskId)
 }
 
-const selectedOptionId = ref("")
-
-/** 初始化时从持久化的 _selected_option 恢复选中项 */
-function initSelectedOption() {
-  const saved = props.msg.metadata_json?._selected_option as string | undefined
-  if (saved) selectedOptionId.value = saved
+// ── 澄清卡片 part 事件转发（卡片由 TurnRenderer 里的 ClarifyCard 渲染） ──
+function handleClarifySubmitPart(text: string, answers: Record<string, string>) {
+  emit("submitClarify", text, answers)
 }
-initSelectedOption()
-
-const confirmOptions = computed<ConfirmOption[]>(() => {
-  const raw = props.msg.metadata_json?.options
-  if (Array.isArray(raw) && raw.length > 0) {
-    if (!selectedOptionId.value) {
-      selectedOptionId.value = raw[0]?.id || ""
-    }
-    return raw
-  }
-  return []
-})
-const confirmState = computed<'idle' | 'confirmed' | 'cancelled'>(() => {
-  const status = props.msg.metadata_json?.confirm_status
-  if (status === 'confirmed') return 'confirmed'
-  if (status === 'cancelled') return 'cancelled'
-  return 'idle'
-})
-
-async function handleConfirm() {
-  confirming.value = true
-  try {
-    const meta = { ...(props.msg.metadata_json || {}) }
-    if (selectedOptionId.value) {
-      meta._selected_option = selectedOptionId.value
-    }
-    emit('confirmTask', meta)
-  } finally {
-    confirming.value = false
-  }
-}
-
-function handleCancel() {
-  emit('cancelTask', props.msg.metadata_json || {})
+function handleClarifyCancelPart() {
+  // 取消澄清：不触发任何操作，仅前端 UI 反馈
 }
 
 const taskButtonText = computed(() => {
@@ -421,9 +362,9 @@ const renderedContent = computed(() => renderMarkdown(props.msg.content || ""))
  * 历史卡片消息（后端保存时无 segments）用 stream_text 恢复流式前置文字，
  * 保证刷新后文字不丢。
  */
-const metadataSegments = computed<Segment[]>(() => {
-  const segs = props.msg.metadata_json?.segments
-  if (Array.isArray(segs) && segs.length > 0) return segs as Segment[]
+const metadataSegments = computed<Part[]>(() => {
+  const parts = props.msg.metadata_json?.parts
+  if (Array.isArray(parts) && parts.length > 0) return parts as Part[]
   const streamText = props.msg.metadata_json?.stream_text as string | undefined
   if (streamText && props.msg.msg_type !== "text") {
     return [{ type: "text", content: streamText }]

@@ -98,8 +98,10 @@ class ChatUseCase:
         trace_id = make_trace_id("chat", session_id)
         context.working["trace_id"] = trace_id
 
-        # 收集所有 message 事件（多任务并行时每条卡片消息独立入库，避免互相覆盖）
-        assistant_messages: list[tuple[str, str, dict]] = []
+        # 单一事实来源：后端只产出一条 message 事件（parts 内嵌卡片），
+        # 这里收集单条 message 并持久化一次。
+        assistant_content: str = ""
+        assistant_meta: dict = {}
         current_event = ""
 
         try:
@@ -116,22 +118,18 @@ class ChatUseCase:
                         try:
                             data = json.loads(line[6:].strip())
                             if isinstance(data, dict) and current_event == "message":
-                                content = data.get("content", "")
-                                if content:
-                                    assistant_messages.append((
-                                        content,
-                                        data.get("msg_type", "text"),
-                                        data.get("metadata") or {},
-                                    ))
+                                assistant_content = data.get("content", "")
+                                assistant_meta = data.get("metadata") or {}
                         except (json.JSONDecodeError, KeyError):
                             pass
 
-            for content, msg_type, meta in assistant_messages:
+            # 有内容或有 parts（卡片类消息 content 可能为空，但 parts 含卡片）都需持久化
+            if assistant_content or assistant_meta.get("parts"):
                 await self.message.add_message(
                     session_id, "assistant",
-                    content,
-                    msg_type=msg_type,
-                    metadata=meta,
+                    assistant_content,
+                    msg_type="text",
+                    metadata=assistant_meta,
                 )
 
         except Exception as e:
@@ -142,7 +140,7 @@ class ChatUseCase:
             )
             yield f"event: error\ndata: {json.dumps({'message': str(e)}, ensure_ascii=False)}\n\n"
 
-        last_meta = assistant_messages[-1][2] if assistant_messages else {}
+        last_meta = assistant_meta
         tokens = last_meta.get("tokens", {})
         if tokens:
             await self.usage.log_usage(

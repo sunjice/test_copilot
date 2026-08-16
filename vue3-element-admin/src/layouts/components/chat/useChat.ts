@@ -11,31 +11,31 @@ import type {
   ChatDraft,
   SkillInfo,
   MessageSendReq,
-  Segment,
+  Part,
 } from "@/api/chat/types"
 
-/** 辅助：获取最后一个 segment */
-function lastSeg(segments: Segment[]): Segment | undefined {
-  return segments.length > 0 ? segments[segments.length - 1] : undefined
+/** 辅助：获取最后一个 part */
+function lastPart(parts: Part[]): Part | undefined {
+  return parts.length > 0 ? parts[parts.length - 1] : undefined
 }
 
 /** 追加文本到末尾 text 区块（若末尾非 text 则新建） */
-function appendText(segments: Segment[], content: string) {
-  const last = lastSeg(segments)
+function appendText(parts: Part[], content: string) {
+  const last = lastPart(parts)
   if (last && last.type === "text") {
     last.content += content
   } else {
-    segments.push({ type: "text", content })
+    parts.push({ type: "text", content })
   }
 }
 
 /** 追加思考内容到末尾 thinking 区块（若末尾非 thinking 则新建） */
-function appendThinking(segments: Segment[], content: string) {
-  const last = lastSeg(segments)
+function appendThinking(parts: Part[], content: string) {
+  const last = lastPart(parts)
   if (last && last.type === "thinking") {
     last.content += content
   } else {
-    segments.push({ type: "thinking", content, startedAt: performance.now() })
+    parts.push({ type: "thinking", content })
   }
 }
 
@@ -47,8 +47,8 @@ export function useChat() {
   const skills = ref<SkillInfo[]>([])
   const loading = ref(false)
   const streaming = ref(false)
-  /** 当前流式回合的 Segment 区块数组（工具/文本/思考按时间线交错） */
-  const segments = ref<Segment[]>([])
+  /** 当前流式回合的 Part 区块数组（工具/文本/思考/卡片按时间线交错） */
+  const segments = ref<Part[]>([])
   const activeDraft = ref<ChatDraft | null>(null)
   const showDraftPanel = ref(false)
   const loadingSessions = ref(false)
@@ -223,15 +223,15 @@ export function useChat() {
       let draftData: Record<string, any> | undefined
       let skillName: string | undefined
       const draftId: number | null = null
-      // 收集所有 message 事件（多卡片并行时每条独立展示，避免互相覆盖）
-      const collectedMessages: Array<{
+      // 单一事实来源：后端只产出一条 message 事件（parts 内嵌卡片），这里收集单条
+      let collectedMessage: {
         content: string
         msg_type: ChatMessage["msg_type"]
         draft_type?: string
         draft_data?: Record<string, any>
         skill_name?: string
         metadata: Record<string, any>
-      }> = []
+      } | null = null
 
       while (true) {
         const { done, value } = await reader.read()
@@ -254,9 +254,9 @@ export function useChat() {
                   // 思考内容流式推送：追加到末尾 thinking 区块（若末尾非 thinking 则新建）
                   if (data.content) {
                     appendThinking(segments.value, data.content)
-                  } else if (segments.value.length === 0 || (!lastSeg(segments.value)?.type.includes("thinking"))) {
-                    // Agent 初始心跳：创建思考区块并记录开始时间
-                    segments.value.push({ type: "thinking", content: "", startedAt: performance.now() })
+                  } else if (segments.value.length === 0 || !lastPart(segments.value)?.type.includes("thinking")) {
+                    // Agent 初始心跳：创建思考区块
+                    segments.value.push({ type: "thinking", content: "" })
                   }
                   break
 
@@ -269,24 +269,43 @@ export function useChat() {
                   break
 
                 case "tool_start":
-                  // 工具开始执行 → 新建 running 工具区块
+                  // 工具开始执行 → 新建 running 工具区块（id 用 run_id 精确关联）
                   segments.value.push({
                     type: "tool",
+                    id: data.run_id || data.id || `tool-${Date.now()}`,
                     name: data.name || "处理中",
                     status: "running",
-                    startedAt: performance.now(),
                   })
                   break
 
                 case "tool_end":
-                  // 工具执行完成 → 结算最后一个 running 工具区块
-                  for (let i = segments.value.length - 1; i >= 0; i--) {
-                    const seg = segments.value[i]
-                    if (seg.type === "tool" && seg.status === "running") {
-                      seg.status = data.error ? "failed" : "done"
-                      seg.durationMs = Math.round(performance.now() - seg.startedAt)
-                      if (data.error) seg.error = data.error
-                      break
+                  // 工具执行完成 → 按 run_id 精确结算（多任务并行不串台）
+                  {
+                    const runId = data.run_id || data.id || ""
+                    let settled = false
+                    for (let i = segments.value.length - 1; i >= 0; i--) {
+                      const seg = segments.value[i]
+                      if (seg.type === "tool" && seg.status === "running") {
+                        if (runId && seg.id === runId) {
+                          seg.status = data.error ? "failed" : "done"
+                          seg.durationMs = data.durationMs ?? 0
+                          if (data.error) seg.error = data.error
+                          settled = true
+                          break
+                        }
+                      }
+                    }
+                    if (!settled) {
+                      // 兜底：run_id 缺失时结算最后一个 running 工具
+                      for (let i = segments.value.length - 1; i >= 0; i--) {
+                        const seg = segments.value[i]
+                        if (seg.type === "tool" && seg.status === "running") {
+                          seg.status = data.error ? "failed" : "done"
+                          seg.durationMs = data.durationMs ?? 0
+                          if (data.error) seg.error = data.error
+                          break
+                        }
+                      }
                     }
                   }
                   break
@@ -297,15 +316,15 @@ export function useChat() {
                   if (data.draft_type) draftType = data.draft_type
                   if (data.draft_data) draftData = data.draft_data
                   if (data.skill_name) skillName = data.skill_name
-                  // 收集所有 message 事件（多卡片并行时每条独立 addLocalMessage，避免互相覆盖）
-                  collectedMessages.push({
+                  // 单一事实来源：单条 message，parts 内嵌卡片
+                  collectedMessage = {
                     content: data.content || "",
                     msg_type: (data.msg_type || "text") as ChatMessage["msg_type"],
                     draft_type: data.draft_type,
                     draft_data: data.draft_data,
                     skill_name: data.skill_name || skillName,
                     metadata: data.metadata || {},
-                  })
+                  }
                   break
 
                 case "error":
@@ -326,88 +345,54 @@ export function useChat() {
       // SSE 流已结束，先关闭 streaming 占位符，再 push 真消息
       streaming.value = false
 
-      // 把本地拼的 segments 序列化（后端 message 事件未携带 segments 时的兜底）
-      const localSegmentMeta: Record<string, any> = {}
-      if (segments.value.length) {
-        // 流已结束，给未结算的思考区块补上 durationMs
-        const now = performance.now()
-        const finalizedSegments = segments.value.map((s) => {
-          if (s.type === "thinking" && s.startedAt != null && s.durationMs == null) {
-            return { ...s, durationMs: Math.round(now - s.startedAt) }
-          }
-          return s
-        })
-
-        // 合并连续的 text 区块为一个（避免 tool 打断 text 导致 TurnRenderer 渲染多段）
-        const merged: Segment[] = []
-        for (const seg of finalizedSegments) {
-          const last = merged.length > 0 ? merged[merged.length - 1] : null
-          if (seg.type === "text" && last && last.type === "text") {
-            last.content += seg.content
-          } else {
-            merged.push({ ...seg })
-          }
+      // 添加助手消息：后端单一事实来源（单条 message，parts 内嵌卡片）
+      if (collectedMessage) {
+        const cm = collectedMessage
+        const meta: Record<string, any> = { ...(cm.metadata || {}) }
+        // 后端 message 已带 parts（单一事实来源），直接用
+        if (!meta.parts && segments.value.length) {
+          meta.parts = JSON.parse(JSON.stringify(segments.value))
+        }
+        if (!meta.skill_name && (cm.skill_name || skillName)) {
+          meta.skill_name = cm.skill_name || skillName
         }
 
-        // 提取工具区块名称列表
-        const toolNames = merged
-          .filter((s): s is Segment & { type: "tool" } => s.type === "tool")
-          .map((s) => s.name)
+        const assistantMsg: ChatMessage = {
+          id: null,
+          session_id: sessionId,
+          role: "assistant",
+          msg_type: cm.msg_type,
+          content: cm.content,
+          metadata_json: Object.keys(meta).length > 0
+            ? meta
+            : (cm.skill_name || skillName)
+              ? { skill_name: cm.skill_name || skillName }
+              : null,
+          draft_id: draftId,
+          create_time: new Date().toISOString(),
+        }
+        addLocalMessage(assistantMsg)
 
-        localSegmentMeta.segments = JSON.parse(JSON.stringify(merged))
-        localSegmentMeta.tool_names = toolNames
-        localSegmentMeta.tool_calls = toolNames.length
-      }
-
-      // 添加助手消息：多卡片并行时逐条添加，互不覆盖
-      if (collectedMessages.length > 0) {
-        for (const cm of collectedMessages) {
-          const meta: Record<string, any> = { ...(cm.metadata || {}) }
-          // 后端 message 事件已带 segments（agent 路径）→ 优先使用；否则用本地拼的兜底
-          if (!meta.segments && Object.keys(localSegmentMeta).length > 0) {
-            Object.assign(meta, localSegmentMeta)
-          }
-          if (!meta.skill_name && (cm.skill_name || skillName)) {
-            meta.skill_name = cm.skill_name || skillName
-          }
-
-          const assistantMsg: ChatMessage = {
+        // 如果有草稿数据，打开草稿面板
+        if (cm.draft_type && cm.draft_data) {
+          activeDraft.value = {
             id: null,
             session_id: sessionId,
-            role: "assistant",
-            msg_type: cm.msg_type,
-            content: cm.content,
-            metadata_json: Object.keys(meta).length > 0
-              ? meta
-              : (cm.skill_name || skillName)
-                ? { skill_name: cm.skill_name || skillName }
-                : null,
-            draft_id: draftId,
-            create_time: new Date().toISOString(),
+            message_id: null,
+            draft_type: cm.draft_type,
+            title: cm.draft_type,
+            content_json: cm.draft_data,
+            status: "pending",
+            confirmed_by: null,
+            confirmed_at: null,
+            create_time: null,
           }
-          addLocalMessage(assistantMsg)
-
-          // 如果有草稿数据，打开草稿面板（多草稿时取最后一个）
-          if (cm.draft_type && cm.draft_data) {
-            activeDraft.value = {
-              id: null,
-              session_id: sessionId,
-              message_id: null,
-              draft_type: cm.draft_type,
-              title: cm.draft_type,
-              content_json: cm.draft_data,
-              status: "pending",
-              confirmed_by: null,
-              confirmed_at: null,
-              create_time: null,
-            }
-            showDraftPanel.value = true
-          }
+          showDraftPanel.value = true
         }
       } else if (assistantContent || segments.value.some(s => s.type === "text" && s.content)) {
-        // 无 message 事件（兜底）：从 segments 中提取纯文本拼接
-        const textFromSegments = segments.value
-          .filter((s): s is Segment & { type: "text" } => s.type === "text")
+        // 无 message 事件（兜底）：从 parts 中提取纯文本拼接
+        const textFromParts = segments.value
+          .filter((s): s is Part & { type: "text" } => s.type === "text")
           .map((s) => s.content)
           .join("")
 
@@ -416,9 +401,9 @@ export function useChat() {
           session_id: sessionId,
           role: "assistant",
           msg_type: assistantMsgType,
-          content: assistantContent || textFromSegments,
-          metadata_json: Object.keys(localSegmentMeta).length > 0
-            ? localSegmentMeta
+          content: assistantContent || textFromParts,
+          metadata_json: segments.value.length
+            ? { parts: JSON.parse(JSON.stringify(segments.value)) }
             : skillName
               ? { skill_name: skillName }
               : null,
@@ -454,25 +439,19 @@ export function useChat() {
       if (e.name === "AbortError") {
         // 保留已输出的部分内容作为消息
         if (segments.value.length) {
-          const textFromSegments = segments.value
-            .filter((s): s is Segment & { type: "text" } => s.type === "text")
+          const textFromParts = segments.value
+            .filter((s): s is Part & { type: "text" } => s.type === "text")
             .map((s) => s.content)
             .join("")
 
-          if (textFromSegments) {
-            const now = performance.now()
-            const finalizedSegments = segments.value.map((s) => {
-              if (s.type === "thinking" && s.startedAt != null && s.durationMs == null) {
-                return { ...s, durationMs: Math.round(now - s.startedAt) }
-              }
-              return s
-            })
+          if (textFromParts) {
+            const parts = JSON.parse(JSON.stringify(segments.value))
             const md: Record<string, any> = {
-              segments: JSON.parse(JSON.stringify(finalizedSegments)),
+              parts,
             }
-            const toolNames = finalizedSegments
-              .filter((s): s is Segment & { type: "tool" } => s.type === "tool")
-              .map((s) => s.name)
+            const toolNames = parts
+              .filter((s: Part) => s.type === "tool")
+              .map((s: any) => s.name)
             if (toolNames.length) {
               md.tool_names = toolNames
               md.tool_calls = toolNames.length
@@ -482,7 +461,7 @@ export function useChat() {
               session_id: sessionId,
               role: "assistant",
               msg_type: "text",
-              content: textFromSegments + "\n\n*[已停止生成]*",
+              content: textFromParts + "\n\n*[已停止生成]*",
               metadata_json: Object.keys(md).length > 0 ? md : null,
               draft_id: null,
               create_time: new Date().toISOString(),
@@ -570,47 +549,28 @@ export function useChat() {
     taskMonitors.clear()
   })
 
-  /** 创建/查找进度消息并轮询任务状态，完成后更新消息内容 */
-  /** 更新任务状态：同时更新 confirm_card（新逻辑）与 task_card（兼容历史数据） */
+  /** 更新任务状态：定位 parts 里的 confirm_card part（按 task_id 匹配） */
   function updateConfirmCardTaskStatus(taskId: number, status: number, done: number, total: number) {
-    // 1) 优先更新 confirm_card（新逻辑：任务进度内嵌在确认卡片中）
-    let updated = false
     for (let i = messages.value.length - 1; i >= 0; i--) {
       const m = messages.value[i]
-      if (m.msg_type === "confirm_card" && m.metadata_json?.task_id === taskId) {
+      const parts = m.metadata_json?.parts
+      if (!Array.isArray(parts)) continue
+      let changed = false
+      const newParts = parts.map((p: any) => {
+        if (p?.type === "confirm_card" && p.card?.task_id === taskId) {
+          changed = true
+          return { ...p, card: { ...p.card, task_status: status, done_count: done, total_count: total } }
+        }
+        return p
+      })
+      if (changed) {
         messages.value[i] = {
           ...m,
-          metadata_json: {
-            ...(m.metadata_json || {}),
-            task_status: status,
-            done_count: done,
-            total_count: total,
-          },
+          metadata_json: { ...(m.metadata_json || {}), parts: newParts },
         }
-        updated = true
-        break
+        return
       }
     }
-    // 2) 兼容历史数据：旧的 task_card 消息仍需要更新进度
-    const idx = messages.value.findIndex(
-      m => m.msg_type === "task_card"
-        && m.metadata_json?.task_id === taskId
-        && !m.metadata_json?._task_progress
-    )
-    if (idx !== -1) {
-      const msg = messages.value[idx]
-      messages.value[idx] = {
-        ...msg,
-        metadata_json: {
-          ...(msg.metadata_json || {}),
-          task_status: status,
-          done_count: done,
-          total_count: total,
-        },
-      }
-      updated = true
-    }
-    void updated
   }
 
   function startTaskMonitor(taskId: number, skillName: string) {
@@ -621,7 +581,7 @@ export function useChat() {
         const detail = await TaskAPI.getDetail(String(taskId))
         const task = detail.task
 
-        // 更新确认消息中的任务状态（不创建进度消息）
+        // 更新确认卡片 part 中的任务状态
         updateConfirmCardTaskStatus(taskId, task.status, task.done_count ?? 0, task.total_count ?? 0)
 
         if (task.status >= 2) {
@@ -637,65 +597,45 @@ export function useChat() {
     taskMonitors.set(taskId, intervalId)
   }
 
-  /** 为已加载的历史消息中未完成任务启动监控，同时补齐已完成/失败任务的计数
-   * 兼容两种消息类型：
-   * - task_card（历史数据）
-   * - confirm_card 带 task_id（新逻辑：进度内嵌在确认卡片中）
-   */
+  /** 为已加载的历史消息中未完成任务启动监控，同时补齐已完成/失败任务的计数。
+   * 卡片已内嵌在消息的 parts 里，这里遍历 parts 找 confirm_card part 的 task_id。 */
   async function monitorIncompleteTasks() {
     for (let i = 0; i < messages.value.length; i++) {
       const msg = messages.value[i]
-      const isTaskCard = msg.msg_type === "task_card"
-      const isConfirmCard = msg.msg_type === "confirm_card"
-      if (!isTaskCard && !isConfirmCard) continue
-      const taskId = msg.metadata_json?.task_id
-      if (!taskId) continue
+      const parts = msg.metadata_json?.parts
+      if (!Array.isArray(parts)) continue
 
-      // 消息中已有明确的完成/失败状态
-      const ts = msg.metadata_json?.task_status
-      if (ts != null && ts >= 2) {
+      for (let pi = 0; pi < parts.length; pi++) {
+        const p = parts[pi] as any
+        if (p?.type !== "confirm_card") continue
+        const taskId = p.card?.task_id
+        if (!taskId) continue
+        const ts = p.card?.task_status
+
         // 已完成/失败但缺少计数，从服务端补齐
-        if ((msg.metadata_json?.done_count ?? 0) === 0 && (msg.metadata_json?.total_count ?? 0) === 0) {
-          try {
-            const detail = await TaskAPI.getDetail(String(taskId))
-            const task = detail.task
-            messages.value[i] = {
-              ...msg,
-              metadata_json: {
-                ...(msg.metadata_json || {}),
-                task_id: taskId,
-                task_status: task.status,
-                done_count: task.done_count,
-                total_count: task.total_count,
-              },
-            }
-          } catch { /* 静默 */ }
+        if (ts != null && ts >= 2) {
+          if ((p.card?.done_count ?? 0) === 0 && (p.card?.total_count ?? 0) === 0) {
+            try {
+              const detail = await TaskAPI.getDetail(String(taskId))
+              const task = detail.task
+              updateConfirmCardTaskStatus(taskId, task.status, task.done_count ?? 0, task.total_count ?? 0)
+            } catch { /* 静默 */ }
+          }
+          continue
         }
-        continue
-      }
 
-      // 未完成任务，先查询任务实际状态
-      if (taskMonitors.has(taskId)) continue
-
-      try {
-        const detail = await TaskAPI.getDetail(String(taskId))
-        const task = detail.task
-        // 先更新当前消息的计数
-        messages.value[i] = {
-          ...msg,
-          metadata_json: {
-            ...(msg.metadata_json || {}),
-            task_id: taskId,
-            task_status: task.status,
-            done_count: task.done_count,
-            total_count: task.total_count,
-          },
+        // 未完成任务，启动监控
+        if (taskMonitors.has(taskId)) continue
+        try {
+          const detail = await TaskAPI.getDetail(String(taskId))
+          const task = detail.task
+          updateConfirmCardTaskStatus(taskId, task.status, task.done_count ?? 0, task.total_count ?? 0)
+          if (task.status >= 2) continue
+          const skillName = p.card?.skill_name || p.card?.task_type || ""
+          startTaskMonitor(taskId, skillName)
+        } catch {
+          // 静默处理
         }
-        if (task.status >= 2) continue
-        const skillName = msg.metadata_json?.skill_name || ""
-        startTaskMonitor(taskId, skillName)
-      } catch {
-        // 静默处理
       }
     }
   }
@@ -708,7 +648,7 @@ export function useChat() {
     const projectId = metadata.project_id
     const suiteId = metadata.suite_id
     const caseIds: number[] | undefined = metadata.case_ids ?? undefined
-    const selectedOption = metadata._selected_option as string | undefined
+    const selectedOption = metadata.selected_option as string | undefined
     const cardSeq = (metadata.card_seq as number | null | undefined) ?? null
 
     try {
@@ -724,8 +664,7 @@ export function useChat() {
       const taskId = res.task_id
       const total = res.total_count ?? metadata.total ?? 0
 
-      // 回写本地 confirm_card 消息的 metadata_json，标记已确认 + 写入任务字段
-      // （任务进度直接内嵌在确认卡片中，不再额外追加 task_card 消息）
+      // 回写本地卡片 part：标记已确认 + 写入任务字段
       updateCardStatusInMessages(cardSeq, "confirmed", selectedOption, {
         task_id: taskId,
         task_status: 0,
@@ -759,7 +698,7 @@ export function useChat() {
     ElMessage.info("已取消创建")
   }
 
-  /** 找到 messages 中对应的 confirm_card（card_seq 为空时回退到最后一条未处理），更新其 metadata_json */
+  /** 在消息的 parts 里定位 confirm_card part（card_seq 匹配，空则回退最后一张未处理的），更新其 card 字段 */
   function updateCardStatusInMessages(
     cardSeq: number | null,
     status: string,
@@ -768,14 +707,40 @@ export function useChat() {
   ) {
     for (let i = messages.value.length - 1; i >= 0; i--) {
       const m = messages.value[i]
-      if (m.msg_type !== "confirm_card" || m.metadata_json?.confirm_status) continue
-      // 指定了 card_seq 时必须精确匹配；未指定时取最后一条未处理的（兼容旧数据）
-      if (cardSeq != null && m.metadata_json?.card_seq !== cardSeq) continue
-      const meta: Record<string, any> = { ...(m.metadata_json || {}), confirm_status: status }
-      if (selectedOption) meta._selected_option = selectedOption
-      if (taskFields) Object.assign(meta, taskFields)
-      messages.value[i] = { ...m, metadata_json: meta }
-      break
+      const parts = m.metadata_json?.parts
+      if (!Array.isArray(parts)) continue
+      // 定位目标 part
+      let targetIdx = -1
+      if (cardSeq != null) {
+        for (let pi = 0; pi < parts.length; pi++) {
+          const p = parts[pi] as any
+          if (p?.type === "confirm_card" && p.card?.card_seq === cardSeq) {
+            targetIdx = pi
+            break
+          }
+        }
+      } else {
+        for (let pi = parts.length - 1; pi >= 0; pi--) {
+          const p = parts[pi] as any
+          if (p?.type === "confirm_card" && p.card?.state !== "confirmed" && p.card?.state !== "cancelled") {
+            targetIdx = pi
+            break
+          }
+        }
+      }
+      if (targetIdx === -1) continue
+      const newParts = parts.map((p: any, pi: number) => {
+        if (pi !== targetIdx) return p
+        const card = { ...(p.card || {}), state: status }
+        if (selectedOption) card.selected_option = selectedOption
+        if (taskFields) Object.assign(card, taskFields)
+        return { ...p, card }
+      })
+      messages.value[i] = {
+        ...m,
+        metadata_json: { ...(m.metadata_json || {}), parts: newParts },
+      }
+      return
     }
   }
 

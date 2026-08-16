@@ -103,34 +103,75 @@ export interface UpdateCardStatusReq {
   metadata: Record<string, any>
 }
 
-// ═══════════════ Segment 区块模型（一轮回复 = 有序区块数组） ═══════════════
+// ═══════════════ Part 区块模型（一轮回复 = 有序区块数组，后端单一事实来源） ═══════════════
+// 对齐 Anthropic content blocks / Vercel message parts 范式。
+// 时间只保留 durationMs（时长），不暴露时间戳，避免前后端时间基准不一致。
 
 /** 工具区块 */
-export interface ToolSegment {
+export interface ToolPart {
   type: "tool"
+  id: string            // 工具调用 run_id，用于并行时精确结算
   name: string
   status: "running" | "done" | "failed"
   argsSummary?: string
-  startedAt: number
   durationMs?: number
   error?: string
 }
 
 /** 文本区块 */
-export interface TextSegment {
+export interface TextPart {
   type: "text"
   content: string
 }
 
 /** 思考区块（可折叠） */
-export interface ThinkingSegment {
+export interface ThinkingPart {
   type: "thinking"
   content: string
-  startedAt?: number   // 思考开始时间戳（performance.now()），用于显示耗时
-  durationMs?: number   // 思考耗时（历史消息从 segments 中恢复）
+  durationMs?: number
 }
 
-export type Segment = ToolSegment | TextSegment | ThinkingSegment
+/** 确认卡片区块（任务创建确认，内嵌任务进度） */
+export interface ConfirmCardPart {
+  type: "confirm_card"
+  card: ConfirmCardData
+}
+
+/** 澄清卡片区块 */
+export interface ClarifyCardPart {
+  type: "clarify_card"
+  card: Record<string, any>
+}
+
+export type Part = ToolPart | TextPart | ThinkingPart | ConfirmCardPart | ClarifyCardPart
+
+/** 确认卡片数据（状态机：idle → confirmed → running → done/failed） */
+export interface ConfirmCardData {
+  card_seq?: number
+  content?: string
+  msg_type?: string
+  project_name?: string
+  suite_name?: string
+  task_type?: string
+  task_label?: string
+  skill_name?: string
+  total?: number
+  options?: Array<{ id: string; label: string; description?: string }>
+  /** 卡片状态 */
+  state?: "idle" | "confirmed" | "cancelled"
+  /** 任务进度（确认后由轮询更新） */
+  task_id?: number | null
+  task_status?: number
+  done_count?: number
+  total_count?: number
+  selected_option?: string | null
+}
+
+// 向后兼容别名（部分旧代码仍引用 Segment 名称）
+export type Segment = Part
+export type ToolSegment = ToolPart
+export type TextSegment = TextPart
+export type ThinkingSegment = ThinkingPart
 
 // ═══════════════ SSE 事件 ═══════════════
 

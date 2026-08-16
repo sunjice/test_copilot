@@ -191,30 +191,52 @@ class MessageService:
         card_seq: int | None,
         metadata: dict,
     ) -> None:
-        """按 card_seq 序号更新指定卡片的 metadata（多卡片并行时精确定位）。
+        """按 card_seq 更新卡片 part 的 metadata。
 
-        若 card_seq 为空（旧面板/旧数据兼容），回退到最后一张卡片。
+        卡片已内嵌在消息的 metadata.parts 数组中（单一事实来源），
+        这里按 card_seq 定位 confirm_card part 并合并字段。
+        若 card_seq 为空，回退到最后一张卡片 part。
         """
-        if card_seq is None:
-            return await self.update_last_card_metadata_by_type(session_id, msg_type, metadata)
-
+        # 从最近的 assistant 消息里找包含 confirm_card part 的 parts 数组
         result = await self.db.execute(
             select(ChatMessage)
             .where(
                 ChatMessage.session_id == session_id,
-                ChatMessage.msg_type == msg_type,
+                ChatMessage.role == "assistant",
             )
             .order_by(ChatMessage.id.desc())
         )
         for msg in result.scalars().all():
             md = msg.metadata_json or {}
-            if md.get("card_seq") == card_seq:
-                merged = dict(md)
-                merged.update(metadata)
-                msg.metadata_json = merged
-                flag_modified(msg, "metadata_json")
-                await self.db.flush()
-                return
+            parts = md.get("parts")
+            if not isinstance(parts, list):
+                continue
+            # 定位目标 part：card_seq 精确匹配，或回退最后一张 confirm_card
+            target_idx: int | None = None
+            if card_seq is not None:
+                for i, p in enumerate(parts):
+                    if isinstance(p, dict) and p.get("type") == "confirm_card" \
+                            and (p.get("card") or {}).get("card_seq") == card_seq:
+                        target_idx = i
+                        break
+            else:
+                for i in range(len(parts) - 1, -1, -1):
+                    p = parts[i]
+                    if isinstance(p, dict) and p.get("type") == "confirm_card":
+                        target_idx = i
+                        break
+            if target_idx is None:
+                continue
+            # 合并字段到该 part 的 card 里
+            part = parts[target_idx]
+            card = dict(part.get("card") or {})
+            card.update(metadata)
+            part["card"] = card
+            md["parts"] = parts
+            msg.metadata_json = md
+            flag_modified(msg, "metadata_json")
+            await self.db.flush()
+            return
 
     async def _auto_title(self, session_id: int, content: str):
         result = await self.db.execute(

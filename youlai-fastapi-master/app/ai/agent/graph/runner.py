@@ -99,14 +99,18 @@ class AgentRunner:
         yield self._sse("thinking", {"message": "AI 正在思考..."})
 
         collected_content = ""
-        collected_cards: list[dict] = []  # 收集所有确认卡片（每项含卡片数据 + segments 快照），支持多任务并行创建
+        collected_cards: list[dict] = []  # 收集所有确认卡片（每项含卡片数据），支持多任务并行创建
         tool_call_count = 0
         tool_names: list[str] = []  # 收集已调用的工具名称（按调用顺序）
-        # 后端构建的 segments 时间线（与前端 Segment 结构一致），随 message 事件持久化，
-        # 保证历史消息也能渲染思考/工具调用过程
-        segments: list[dict] = []
-        # 初始 thinking 区块（历史消息渲染思考过程用）
-        segments.append({"type": "thinking", "content": "", "startedAt": int(time.time() * 1000)})
+        # 后端构建的 parts 时间线（单一事实来源，与前端 Part 结构一致），随 message 事件持久化。
+        # part 类型：thinking / tool / text / confirm_card。
+        # 时间只保留 durationMs（时长），不暴露时间戳，避免前后端时间基准不一致。
+        parts: list[dict] = []
+        # 初始 thinking part
+        thinking_started_ts = time.time()
+        parts.append({"type": "thinking", "content": ""})
+        # 工具运行中的起始时间戳（仅后端内部用于计算 durationMs，不进入 parts）
+        tool_start_ts: dict[str, float] = {}
 
         # ── 分轮 LLM 日志状态（每轮 ReAct 一条 agent_llm_round） ──
         span_seq = 0
@@ -135,11 +139,11 @@ class AgentRunner:
                         if pending_round and pending_round.get("ttft") is None:
                             pending_round["ttft"] = int((time.time() - pending_round["t0"]) * 1000)
                         collected_content += chunk.content
-                        # 同步累积文本区块（与前端 Segment 结构一致）
-                        if segments and segments[-1]["type"] == "text":
-                            segments[-1]["content"] += chunk.content
+                        # 同步累积文本 part（与前端 Part 结构一致）
+                        if parts and parts[-1]["type"] == "text":
+                            parts[-1]["content"] += chunk.content
                         else:
-                            segments.append({"type": "text", "content": chunk.content})
+                            parts.append({"type": "text", "content": chunk.content})
                         yield self._sse("chunk", {"content": chunk.content})
 
                 elif kind == "on_chat_model_start":
@@ -187,57 +191,69 @@ class AgentRunner:
                     # astream_events v2 工具名在 event["name"]；v1 可能在 data["name"]
                     name = data.get("name") or event.get("name") or ""
                     tool_input = data.get("input", {})
+                    # run_id 用于 tool_end 时精确结算（多任务并行不串台）
+                    run_id = event.get("run_id") or ""
                     if name:
                         tool_names.append(name)
-                    # 记录 tool 区块（running 态，tool_end 时结算）
-                    segments.append({
+                    # 记录 tool part（running 态，tool_end 时按 run_id 结算）
+                    parts.append({
                         "type": "tool",
+                        "id": run_id,
                         "name": name,
                         "status": "running",
-                        "startedAt": int(time.time() * 1000),
                     })
-                    logger.debug(f"[AgentRunner] 工具 {name} 开始执行")
-                    yield self._sse("tool_start", {"name": name, "args": tool_input})
+                    # 仅后端内部记录起始时间戳，用于结算 durationMs，不暴露给前端
+                    tool_start_ts[run_id or name] = time.time()
+                    logger.debug(f"[AgentRunner] 工具 {name} 开始执行 run_id={run_id}")
+                    yield self._sse("tool_start", {"name": name, "args": tool_input, "run_id": run_id})
 
                 elif kind == "on_tool_end":
                     data = event.get("data", {}) or {}
                     output = data.get("output", "")
                     name = data.get("name") or event.get("name") or ""
-                    logger.debug(f"[AgentRunner] 工具 {name} 执行完成")
+                    run_id = event.get("run_id") or ""
+                    logger.debug(f"[AgentRunner] 工具 {name} 执行完成 run_id={run_id}")
 
-                    # 结算 tool 区块（done 态 + durationMs）
-                    # 多任务并行时，按 name 精确匹配该工具的 running 段，
-                    # 避免"找最近 running"导致的错位结算。
+                    # 结算 tool part（done 态 + durationMs），按 run_id 精确匹配，
+                    # 多任务并行时不会错位。
+                    start_ts = tool_start_ts.pop(run_id, None)
+                    duration_ms = max(0, int((time.time() - start_ts) * 1000)) if start_ts is not None else 0
                     settled = False
-                    for seg in reversed(segments):
+                    for seg in reversed(parts):
                         if seg["type"] == "tool" and seg["status"] == "running":
-                            if not name or seg.get("name") == name:
+                            if run_id and seg.get("id") == run_id:
                                 seg["status"] = "done"
-                                seg["durationMs"] = max(0, int((time.time() * 1000) - seg["startedAt"]))
+                                seg["durationMs"] = duration_ms
                                 settled = True
                                 break
-                    if not settled and name:
-                        # 兜底：name 匹配不上时，找最近的 running（兼容 name 为空）
-                        for seg in reversed(segments):
+                    if not settled:
+                        # 兜底：run_id 缺失时，按 name 匹配最近的 running
+                        for seg in reversed(parts):
                             if seg["type"] == "tool" and seg["status"] == "running":
-                                seg["status"] = "done"
-                                seg["durationMs"] = max(0, int((time.time() * 1000) - seg["startedAt"]))
-                                break
+                                if not name or seg.get("name") == name:
+                                    seg["status"] = "done"
+                                    seg["durationMs"] = duration_ms
+                                    break
 
                     # 卡片数据：优先从 ToolMessage.artifact 读取
                     card = self._extract_card(output)
                     if card:
-                        # 快照截至该工具完成的 segments，随卡片消息持久化（历史消息可还原思考/工具过程）
-                        collected_cards.append({
-                            "card": card,
-                            "segments_snapshot": json.loads(json.dumps(segments)),
+                        # 卡片作为 part 追加到 parts（有序、内嵌单条消息）。
+                        # part type 按 card.msg_type 区分：confirm_card（任务创建确认） / clarify_card（澄清问答）
+                        card_msg_type = card.get("msg_type") or "confirm_card"
+                        card_data = dict(card.get("metadata") or {})
+                        card_data["card_seq"] = len(collected_cards)
+                        card_data["content"] = card.get("content") or ""
+                        card_data["msg_type"] = card_msg_type
+                        parts.append({
+                            "type": card_msg_type,
+                            "card": card_data,
                         })
-                        yield self._sse("tool_end", {"name": name, "summary": self._summarize(output)})
-                        # 确认卡片类工具结果直接推给用户，但不中断后续 LLM 轮次，
-                        # 允许模型继续创建其它任务（多任务并行时每张卡独立推送）
-                        logger.debug(f"[AgentRunner] 工具 {name} 返回确认卡片（累计 {len(collected_cards)} 张），继续执行以支持多任务创建")
+                        collected_cards.append(card_data)
+                        yield self._sse("tool_end", {"name": name, "summary": self._summarize(output), "run_id": run_id})
+                        logger.debug(f"[AgentRunner] 工具 {name} 返回卡片（{card_msg_type}，累计 {len(collected_cards)} 张），继续执行以支持多任务创建")
                     else:
-                        yield self._sse("tool_end", {"name": name, "summary": self._summarize(output)})
+                        yield self._sse("tool_end", {"name": name, "summary": self._summarize(output), "run_id": run_id})
 
                 elif kind == "on_timeout":
                     duration_ms = int((time.time() - t_start) * 1000)
@@ -262,78 +278,38 @@ class AgentRunner:
             yield self._sse("done", {})
             return
 
-        # ── 最终回复（合并卡片数据，逐张发送，支持多任务并行） ──
+        # ── 最终回复（单条 message，parts 内嵌所有 thinking/tool/text/card） ──
         duration_ms = int((time.time() - t_start) * 1000)
 
-        # 给 thinking 区块补 durationMs（历史消息渲染耗时用），与前端收尾逻辑保持一致
-        now_ms = int(time.time() * 1000)
-        for seg in segments:
-            if seg.get("type") == "thinking" and seg.get("startedAt") is not None and seg.get("durationMs") is None:
-                seg["durationMs"] = max(0, now_ms - seg["startedAt"])
+        # 给 thinking part 补 durationMs（历史消息渲染耗时用）
+        for seg in parts:
+            if seg.get("type") == "thinking" and seg.get("durationMs") is None:
+                seg["durationMs"] = max(0, int((time.time() - thinking_started_ts) * 1000))
 
         if collected_content or collected_cards:
-            if collected_cards:
-                # 多卡：每张卡独立推送一条 message 事件，card_seq 供前端确认/取消时精确定位
-                for seq, entry in enumerate(collected_cards):
-                    card = entry["card"]
-                    final_msg_type = card.get("msg_type", "text")
-                    final_metadata = dict(card.get("metadata") or {})
-                    # 卡片类消息优先用 artifact.content 作为主内容（如 clarify_card 的 title），
-                    # agent 文本兜底。确保前端渲染的标题不会丢失。
-                    final_content = card.get("content") or collected_content or ""
+            # 单一事实来源：无论有没有卡片，都只产出一条 message，
+            # 卡片以 confirm_card part 内嵌在 parts 里（有序排列）。
+            final_msg_type = "text"
+            final_content = collected_content or ""
 
-                    # 卡片消息附带 LLM 调工具前的流式文字，前端用于渲染/恢复打字机阶段的完整内容
-                    if collected_content:
-                        final_metadata["stream_text"] = collected_content
+            final_metadata: dict = {
+                "parts": parts,
+                "tool_names": tool_names,
+                "tool_calls": tool_call_count,
+                "duration_ms": duration_ms,
+                "tokens": {
+                    "prompt": meter.prompt_tokens,
+                    "completion": meter.completion_tokens,
+                    "total": meter.total_tokens,
+                },
+            }
 
-                    # 该卡对应的 segments 快照（思考 + 文本 + 截至该卡的 tool 记录）
-                    snapshot = entry.get("segments_snapshot") or []
-                    if snapshot:
-                        final_metadata["segments"] = snapshot
-                    final_metadata["card_seq"] = seq
-
-                    final_metadata.update({
-                        "tool_names": tool_names,
-                        "tool_calls": tool_call_count,
-                        "duration_ms": duration_ms,
-                        "tokens": {
-                            "prompt": meter.prompt_tokens,
-                            "completion": meter.completion_tokens,
-                            "total": meter.total_tokens,
-                        },
-                    })
-
-                    yield self._sse("message", {
-                        "role": "assistant",
-                        "msg_type": final_msg_type,
-                        "content": final_content,
-                        "metadata": final_metadata,
-                    })
-            else:
-                final_msg_type = "text"
-                final_metadata = {}
-                final_content = collected_content or ""
-
-                if segments:
-                    final_metadata["segments"] = segments
-
-                final_metadata.update({
-                    "tool_names": tool_names,
-                    "tool_calls": tool_call_count,
-                    "duration_ms": duration_ms,
-                    "tokens": {
-                        "prompt": meter.prompt_tokens,
-                        "completion": meter.completion_tokens,
-                        "total": meter.total_tokens,
-                    },
-                })
-
-                yield self._sse("message", {
-                    "role": "assistant",
-                    "msg_type": final_msg_type,
-                    "content": final_content,
-                    "metadata": final_metadata,
-                })
+            yield self._sse("message", {
+                "role": "assistant",
+                "msg_type": final_msg_type,
+                "content": final_content,
+                "metadata": final_metadata,
+            })
 
         yield self._sse("done", {})
 

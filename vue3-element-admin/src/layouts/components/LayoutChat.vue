@@ -123,25 +123,18 @@
           </div>
         </div>
 
-        <template v-for="item in groupedMessages" :key="item.key">
-          <MultiConfirmCard
-            v-if="item.kind === 'confirm-group'"
-            :messages="item.messages"
-            @confirm-task="onConfirmTaskFromGroup"
-            @cancel-task="onCancelTaskFromGroup"
-            @view-task="onViewTask"
-          />
-          <ChatMessage
-            v-else
-            :msg="item.msg"
-            @viewDraft="onViewDraft"
-            @confirmDraft="onConfirmDraft"
-            @confirmTask="onConfirmTask"
-            @cancelTask="onCancelTask"
-            @submitClarify="onSubmitClarify"
-            @retry="onRetry"
-          />
-        </template>
+        <ChatMessage
+          v-for="(msg, idx) in messages"
+          :key="msg.id || `${msg.role}-${idx}-${msg.create_time}`"
+          :msg="msg"
+          @view-draft="onViewDraft"
+          @confirm-draft="onConfirmDraft"
+          @confirm-task="onConfirmTask"
+          @cancel-task="onCancelTask"
+          @submit-clarify="onSubmitClarify"
+          @view-task="onViewTask"
+          @retry="onRetry"
+        />
 
         <StreamingBubble
           v-if="streaming"
@@ -284,8 +277,6 @@ import {
 import ChatMessage from "./chat/ChatMessage.vue"
 import TaskListPanel from "./chat/TaskListPanel.vue"
 import StreamingBubble from "./chat/StreamingBubble.vue"
-import MultiConfirmCard from "./chat/MultiConfirmCard.vue"
-import { useMessageGrouping } from "./chat/useMessageGrouping"
 import { useChat } from "./chat/useChat"
 import { useAiContextStore } from "@/stores/aiContext"
 import { useChatResize, useInputResize, RESIZE_DIRS } from "./chat/useChatResize"
@@ -366,17 +357,14 @@ const {
   init,
 } = useChat()
 
-// 是否有任务消息（task_card 历史数据，或已确认的 confirm_card 内嵌任务）
+// 是否有任务（消息 parts 里的 confirm_card part 带 task_id，或 task_card 消息）
 const hasTasks = computed(() =>
-  messages.value.some(
-    (m) =>
-      m.msg_type === "task_card" ||
-      (m.msg_type === "confirm_card" && m.metadata_json?.task_id != null)
-  )
+  messages.value.some((m) => {
+    if (m.msg_type === "task_card") return true
+    const parts = m.metadata_json?.parts
+    return Array.isArray(parts) && parts.some((p: any) => p?.type === "confirm_card" && p.card?.task_id != null)
+  })
 )
-
-// ── 消息分组：连续的 assistant confirm_card 合并渲染（共享逻辑） ──
-const groupedMessages = useMessageGrouping(messages)
 
 // ── 初始化（只执行一次） ──
 const inited = ref(false)
@@ -762,15 +750,6 @@ function onCancelTask(metadata: Record<string, any>) {
   cancelTask(metadata)
 }
 
-// ── 合并卡片（MultiConfirmCard）事件转发 ──
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function onConfirmTaskFromGroup(_msg: any, metadata: Record<string, any>) {
-  confirmCreateTask(metadata)
-}
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function onCancelTaskFromGroup(_msg: any, metadata: Record<string, any>) {
-  cancelTask(metadata)
-}
 function onViewTask(taskId: number) {
   if (taskId) {
     router.push(`/aitc/tasks/${taskId}`)

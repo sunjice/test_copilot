@@ -26,7 +26,7 @@
           </span>
           <span class="tool-name">{{ toolDisplayName(seg.name) }}</span>
           <span v-if="seg.status === 'running'" class="tool-elapsed">
-            {{ elapsedStr(seg.startedAt) }}
+            {{ elapsedStr(seg.id) }}
           </span>
           <span v-else-if="seg.durationMs != null" class="tool-duration">
             {{ formatDuration(seg.durationMs) }}
@@ -41,7 +41,7 @@
           <div class="tool-detail-row">
             <span class="tool-detail-label">耗时</span>
             <span class="tool-detail-value">
-              {{ seg.status === 'running' ? elapsedStr(seg.startedAt) + '（执行中）' : seg.durationMs != null ? formatDuration(seg.durationMs) : '-' }}
+              {{ seg.status === 'running' ? elapsedStr(seg.id) + '（执行中）' : seg.durationMs != null ? formatDuration(seg.durationMs) : '-' }}
             </span>
           </div>
           <div v-if="seg.status === 'failed' && seg.error" class="tool-detail-row">
@@ -50,6 +50,23 @@
           </div>
         </div>
       </details>
+
+      <!-- 确认卡片区块（任务创建确认） -->
+      <ConfirmCard
+        v-else-if="seg.type === 'confirm_card'"
+        :card="seg.card"
+        @confirm="onCardConfirm"
+        @cancel="onCardCancel"
+        @view-task="onCardViewTask"
+      />
+
+      <!-- 澄清问答区块 -->
+      <ClarifyCard
+        v-else-if="seg.type === 'clarify_card'"
+        :card="seg.card"
+        @submit="onClarifySubmit"
+        @cancel="onClarifyCancel"
+      />
 
       <!-- 文本区块 -->
       <div v-else-if="seg.type === 'text'" class="turn-text" v-html="renderStreamText(seg.content, idx)" />
@@ -61,16 +78,43 @@
 </template>
 
 <script setup lang="ts">
+import { reactive, watch } from "vue"
 import { Loading, CircleCheckFilled, CircleCloseFilled, Tools } from "@element-plus/icons-vue"
 import { renderMarkdown, renderStreamingMarkdown } from "./utils"
-import type { Segment } from "@/api/chat/types"
+import type { Part, ConfirmCardData } from "@/api/chat/types"
+import ConfirmCard from "./ConfirmCard.vue"
+import ClarifyCard from "./ClarifyCard.vue"
 
 const props = withDefaults(defineProps<{
-  segments: Segment[]
+  segments: Part[]
   isStreaming?: boolean
 }>(), {
   isStreaming: false,
 })
+
+const emit = defineEmits<{
+  (e: "confirmTask", card: ConfirmCardData): void
+  (e: "cancelTask", card: ConfirmCardData): void
+  (e: "viewTask", taskId: number): void
+  (e: "submitClarify", text: string, answers: Record<string, string>): void
+  (e: "cancelClarify"): void
+}>()
+
+/** 工具运行起始时间（前端本地计时，仅用于 running 态 UI 显示） */
+const toolStartMap = reactive<Record<string, number>>({})
+
+// 当 segments 变化时，为 running 状态的工具记录本地起始时间
+watch(
+  () => props.segments,
+  (segs) => {
+    for (const seg of segs) {
+      if (seg.type === "tool" && seg.status === "running" && seg.id && !(seg.id in toolStartMap)) {
+        toolStartMap[seg.id] = Date.now()
+      }
+    }
+  },
+  { immediate: true, deep: true }
+)
 
 /** 工具名 → 中文显示名 */
 const TOOL_NAMES: Record<string, string> = {
@@ -99,39 +143,44 @@ function formatDuration(ms: number): string {
 
 /**
  * 当前已流逝时间（用于 running 态实时更新）。
- *
- * startedAt 有两种语义（历史遗留）：
- * 1. 前端流式期间：performance.now() 相对时间（页面加载后毫秒，量级 ~几千）
- * 2. 后端持久化：int(time.time() * 1000) Unix 毫秒时间戳（量级 ~1.7e12）
- *
- * 这里统一兼容：若 startedAt 是 Unix 时间戳（> 1e12），用 Date.now() 相减；
- * 否则视为相对时间，用 performance.now() 相减。
+ * 通过工具 id 查本地起始时间，与后端无关（后端只给 durationMs）。
  */
-function elapsedStr(startedAt: number): string {
-  const elapsed = startedAt > 1e12
-    ? Math.round(Date.now() - startedAt)
-    : Math.round(performance.now() - startedAt)
+function elapsedStr(toolId: string): string {
+  const start = toolStartMap[toolId]
+  if (!start) return "0ms"
+  const elapsed = Math.max(0, Date.now() - start)
   return formatDuration(elapsed)
 }
 
 /** 思考区块标题 */
-function thinkingLabel(seg: Segment & { type: "thinking" }, _idx: number): string {
+function thinkingLabel(seg: Part & { type: "thinking" }, _idx: number): string {
   if (seg.content) return "思考过程"
   // 流式中无内容显示"模型正在思考"，已结束时显示"思考完成"
   return props.isStreaming ? "模型正在思考" : "思考完成"
 }
 
+// ── 卡片事件转发 ──
+function onCardConfirm(card: ConfirmCardData) {
+  emit("confirmTask", card)
+}
+function onCardCancel(card: ConfirmCardData) {
+  emit("cancelTask", card)
+}
+function onCardViewTask(taskId: number) {
+  emit("viewTask", taskId)
+}
+
+// ── 澄清卡片事件转发 ──
+function onClarifySubmit(text: string, answers: Record<string, string>) {
+  emit("submitClarify", text, answers)
+}
+function onClarifyCancel() {
+  emit("cancelClarify")
+}
+
 /** 思考区块耗时文本（流式时实时计算，历史时使用 durationMs） */
-function segTitleDuration(seg: Segment & { type: "thinking" }): string | null {
-  if (!seg.startedAt) return null
-  const dur = seg.durationMs != null
-    ? seg.durationMs
-    : props.isStreaming
-      ? Math.round(
-        // 同样兼容 Unix 时间戳与相对时间两种语义
-        seg.startedAt > 1e12 ? Date.now() - seg.startedAt : performance.now() - seg.startedAt
-      )
-      : null
+function segTitleDuration(seg: Part & { type: "thinking" }): string | null {
+  const dur = seg.durationMs != null ? seg.durationMs : null
   if (dur == null) return null
   return `（${formatDuration(dur)}）`
 }

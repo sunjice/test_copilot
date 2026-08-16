@@ -199,7 +199,7 @@ async def cancel_confirm(
         session_id,
         "confirm_card",
         card_seq,
-        {"confirm_status": "cancelled"},
+        {"state": "cancelled"},
     )
     return Result(data=None, msg="已取消")
 
@@ -284,17 +284,17 @@ async def confirm_create_task(
         create_by=user.username,
     )
 
-    # 回写 confirm_card 消息的 metadata_json，标记已确认并内嵌任务信息
+    # 回写卡片 part，标记已确认并内嵌任务信息
     # （任务进度直接展示在确认卡片中，不再单独写 task_card 消息）
     confirm_meta: dict = {
-        "confirm_status": "confirmed",
+        "state": "confirmed",
         "task_id": task_vo.id,
         "task_status": 0,
         "done_count": 0,
         "total_count": task_vo.total_count,
     }
     if req.selected_option:
-        confirm_meta["_selected_option"] = req.selected_option
+        confirm_meta["selected_option"] = req.selected_option
     await usecase.update_card_metadata_by_seq(
         session_id,
         "confirm_card",

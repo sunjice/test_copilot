@@ -308,13 +308,62 @@ class IntentRoutingStrategy(ChatStrategy):
             "skill_name": skill.name,
             "mode": skill.mode.value,
         }}
+
+        # 统一到 parts 体系：skill 执行作为一个 tool part，
+        # 卡片结果（confirm_card/clarify_card）作为对应 part 内嵌进单条 message。
+        t0 = time.time()
+        run_id = f"skill-{skill.name}-{int(t0 * 1000)}"
+
+        # 1) tool_start：skill 执行开始
+        yield {"event": "tool_start", "data": {
+            "name": skill.name,
+            "run_id": run_id,
+            "args": {},
+        }}
+
+        # 2) 构造 parts（tool + 文本/卡片），与 agent 路径格式一致
+        duration_ms = int((time.time() - t0) * 1000)
+        parts: list[dict] = [
+            {
+                "type": "tool",
+                "id": run_id,
+                "name": skill.name,
+                "status": "done",
+                "durationMs": duration_ms,
+            },
+        ]
+        if result.msg_type in ("confirm_card", "clarify_card", "task_card"):
+            card_data = dict(result.metadata or {})
+            card_data["content"] = result.content
+            card_data["msg_type"] = result.msg_type
+            card_data["skill_name"] = skill.name
+            parts.append({"type": result.msg_type, "card": card_data})
+        else:
+            if result.content:
+                parts.append({"type": "text", "content": result.content})
+
+        # 3) tool_end：skill 执行结束（结算 tool part 的 durationMs）
+        yield {"event": "tool_end", "data": {
+            "name": skill.name,
+            "run_id": run_id,
+            "durationMs": duration_ms,
+        }}
+
+        # 4) 单条 message，parts 内嵌（text + 卡片），与 agent 路径格式一致
+        metadata = dict(result.metadata or {})
+        metadata["parts"] = parts
+        metadata["skill_name"] = skill.name
+        metadata["tool_names"] = [skill.name]
+        metadata["tool_calls"] = 1
+        metadata["duration_ms"] = duration_ms
+
         yield {"event": "message", "data": {
             "role": "assistant",
-            "msg_type": result.msg_type,
-            "content": result.content,
+            "msg_type": "text",
+            "content": result.content if result.msg_type not in ("confirm_card", "clarify_card", "task_card") else "",
             "skill_name": skill.name,
             "success": result.success,
-            "metadata": result.metadata,
+            "metadata": metadata,
         }}
 
         if result.error and not result.content:

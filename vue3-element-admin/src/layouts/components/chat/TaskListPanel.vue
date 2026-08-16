@@ -79,25 +79,27 @@ const tasks = computed(() => {
   const list: TaskItem[] = []
 
   for (const msg of props.messages) {
-    // 兼容两种消息类型：task_card（历史数据）、confirm_card 内嵌任务（新逻辑）
-    const isTaskCard = msg.msg_type === "task_card"
-    const isConfirmCard = msg.msg_type === "confirm_card"
-    if (!isTaskCard && !isConfirmCard) continue
-    const meta = msg.metadata_json
-    if (!meta?.task_id) continue
-    if (seen.has(meta.task_id)) continue
-    seen.add(meta.task_id)
-
-    // confirm_card 需要已确认才展示在任务列表
-    if (isConfirmCard && meta.confirm_status !== "confirmed") continue
-
-    list.push({
-      taskId: meta.task_id,
-      label: TASK_TYPE_MAP[meta.skill_name]?.label || meta.skill_name || "任务",
-      status: meta.task_status ?? 0,
-      done: meta.done_count ?? 0,
-      total: meta.total_count ?? meta.total ?? 0,
-    })
+    // 从消息的 parts 里提取 confirm_card part 中的任务信息
+    const parts = msg.metadata_json?.parts
+    if (Array.isArray(parts)) {
+      for (const p of parts) {
+        if (p?.type !== "confirm_card") continue
+        const card = p.card || {}
+        if (card.task_id == null) continue
+        if (card.state !== "confirmed") continue
+        const taskId = Number(card.task_id)
+        if (seen.has(taskId)) continue
+        seen.add(taskId)
+        const rawLabel = card.task_label || card.task_type || card.skill_name || ""
+        list.push({
+          taskId,
+          label: TASK_TYPE_MAP[rawLabel]?.label || rawLabel || "任务",
+          status: card.task_status ?? 0,
+          done: card.done_count ?? 0,
+          total: card.total_count ?? card.total ?? 0,
+        })
+      }
+    }
   }
 
   return list

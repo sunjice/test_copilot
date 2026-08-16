@@ -95,25 +95,18 @@
           </div>
         </div>
 
-        <template v-for="item in groupedMessages" :key="item.key">
-          <MultiConfirmCard
-            v-if="item.kind === 'confirm-group'"
-            :messages="item.messages"
-            @confirm-task="onConfirmTaskFromGroup"
-            @cancel-task="onCancelTaskFromGroup"
-            @view-task="onViewTask"
-          />
-          <ChatMessage
-            v-else
-            :msg="item.msg"
-            @view-draft="onViewDraft"
-            @confirm-draft="onConfirmDraft"
-            @confirm-task="onConfirmTask"
-            @cancel-task="onCancelTask"
-            @submit-clarify="onSubmitClarify"
-            @retry="onRetry"
-          />
-        </template>
+        <ChatMessage
+          v-for="(msg, idx) in messages"
+          :key="msg.id || `${msg.role}-${idx}-${msg.create_time}`"
+          :msg="msg"
+          @view-draft="onViewDraft"
+          @confirm-draft="onConfirmDraft"
+          @confirm-task="onConfirmTask"
+          @cancel-task="onCancelTask"
+          @submit-clarify="onSubmitClarify"
+          @view-task="onViewTask"
+          @retry="onRetry"
+        />
 
         <StreamingBubble
           v-if="streaming"
@@ -245,8 +238,6 @@ import {
 import ChatMessage from "@/layouts/components/chat/ChatMessage.vue"
 import TaskListPanel from "@/layouts/components/chat/TaskListPanel.vue"
 import StreamingBubble from "@/layouts/components/chat/StreamingBubble.vue"
-import MultiConfirmCard from "@/layouts/components/chat/MultiConfirmCard.vue"
-import { useMessageGrouping } from "@/layouts/components/chat/useMessageGrouping"
 import { useChat } from "@/layouts/components/chat/useChat"
 import { useInputResize } from "@/layouts/components/chat/useChatResize"
 import { formatHistoryTime } from "@/layouts/components/chat/utils"
@@ -280,19 +271,56 @@ const {
   init,
 } = useChat()
 
-// 是否有任务消息（task_card 历史数据，或已确认的 confirm_card 内嵌任务）
+// 是否有任务（消息 parts 里的 confirm_card part 带 task_id，或 task_card 消息）
 const hasTasks = computed(() =>
-  messages.value.some(
-    (m) =>
-      m.msg_type === "task_card" ||
-      (m.msg_type === "confirm_card" && m.metadata_json?.task_id != null)
-  )
+  messages.value.some((m) => {
+    if (m.msg_type === "task_card") return true
+    const parts = m.metadata_json?.parts
+    return Array.isArray(parts) && parts.some((p: any) => p?.type === "confirm_card" && p.card?.task_id != null)
+  })
 )
 
+// ── 会话持久化（切页面后恢复到上次会话，保持消息和滚动位置） ──
+const SESSION_KEY = "ai-chat-active-session-id"
+
+function persistSessionId(id: number | null) {
+  try {
+    if (id != null) sessionStorage.setItem(SESSION_KEY, String(id))
+    else sessionStorage.removeItem(SESSION_KEY)
+  } catch {
+    // 忽略存储异常
+  }
+}
+
+function restoreSessionId(): number | null {
+  try {
+    const v = sessionStorage.getItem(SESSION_KEY)
+    return v ? Number(v) : null
+  } catch {
+    return null
+  }
+}
+
+// 监听会话切换，持久化
+watch(activeSessionId, (id) => persistSessionId(id))
+
 // ── 初始化 ──
-onMounted(() => {
-  init()
+onMounted(async () => {
+  await init()
+  // 恢复上次会话：优先 sessionStorage 记住的会话，其次第一个会话
+  const savedId = restoreSessionId()
+  if (savedId != null && sessions.value.some((s) => s.id === savedId)) {
+    await selectSession(savedId)
+  } else if (sessions.value.length > 0) {
+    await selectSession(sessions.value[0].id!)
+  }
+  // 加载完成后滚到底部
+  await nextTick()
+  scrollToBottom()
 })
+
+// 暴露滚动方法，供父组件在 keep-alive 激活时调用
+defineExpose({ scrollToBottom, restoreScrollPosition, saveScrollPosition })
 
 // ── 同步上下文到 pageContext（与 LayoutChat 一致：从 aiContextStore 读取） ──
 // index.vue 在工作区选择变化时已调用 aiContextStore.register/update，
@@ -308,20 +336,8 @@ watch(
   { deep: true, immediate: true }
 )
 
-// ── 消息分组：连续的 assistant confirm_card 合并渲染（共享逻辑） ──
-const groupedMessages = useMessageGrouping(messages)
-
 const router = useRouter()
 
-// 合并卡片里转发的确认/取消事件 → 走原 useChat 的 confirmCreateTask/cancelTask
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function onConfirmTaskFromGroup(_msg: ChatMessageType, meta: Record<string, any>) {
-  confirmCreateTask(meta)
-}
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function onCancelTaskFromGroup(_msg: ChatMessageType, meta: Record<string, any>) {
-  cancelTask(meta)
-}
 function onViewTask(taskId: number) {
   if (taskId) {
     router.push(`/aitc/tasks/${taskId}`)
@@ -655,6 +671,8 @@ async function onSubmitClarify(text: string, answers: Record<string, string>) {
 // ── 滚动控制 ──
 const userScrolledUp = ref(false)
 const showScrollBottom = ref(false)
+// 滚动位置缓存（keep-alive 场景下，切走前保存，切回后恢复，保留用户停留的位置）
+const savedScrollTop = ref<number | null>(null)
 
 function onMsgScroll() {
   const el = msgListRef.value
@@ -670,6 +688,23 @@ function scrollToBottom() {
   el.scrollTop = el.scrollHeight
   userScrolledUp.value = false
   showScrollBottom.value = false
+}
+
+/** 保存当前滚动位置（切走前调用） */
+function saveScrollPosition() {
+  const el = msgListRef.value
+  if (el) savedScrollTop.value = el.scrollTop
+}
+
+/** 恢复滚动位置（切回后调用） */
+function restoreScrollPosition() {
+  const el = msgListRef.value
+  if (!el) return
+  if (savedScrollTop.value != null) {
+    el.scrollTop = savedScrollTop.value
+  } else {
+    el.scrollTop = el.scrollHeight
+  }
 }
 
 // 自动滚动（用户没有手动上翻时）

@@ -190,20 +190,32 @@ function resetSelection() {
 
 // ── 输出上下文 ──
 function emitContext() {
+  // 显式设置所有字段（未选中用 null 覆盖），避免 store 残留旧值
   const ctx: Record<string, any> = {}
   if (projectId.value != null) {
     ctx.projectId = projectId.value
     const proj = projectOptions.value.find((p) => p.value === projectId.value)
     ctx.projectName = proj?.label || ""
+  } else {
+    ctx.projectId = null
+    ctx.projectName = ""
   }
   if (selectedSuites.value.length === 1) {
     ctx.suiteId = selectedSuites.value[0].id
     ctx.suiteName = selectedSuites.value[0].label
   } else if (selectedSuites.value.length > 1) {
+    ctx.suiteId = null
+    ctx.suiteName = ""
     ctx.suiteIds = selectedSuites.value.map((s) => s.id)
+  } else {
+    ctx.suiteId = null
+    ctx.suiteName = ""
+    ctx.suiteIds = null
   }
   if (selectedCases.value.length) {
     ctx.selectedCaseIds = selectedCases.value.map((c) => c.id)
+  } else {
+    ctx.selectedCaseIds = null
   }
   emit("context-change", ctx)
 }
