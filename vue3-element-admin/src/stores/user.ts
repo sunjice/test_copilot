@@ -87,6 +87,13 @@ export const useUserStore = defineStore("user", () => {
 
     // 3. 清理 SSE 连接
     cleanupSseServices();
+
+    // 4. 清理 AI 聊天相关缓存（会话记忆、滚动位置等）
+    try {
+      sessionStorage.removeItem("ai-chat-active-session-id");
+    } catch {
+      // 忽略存储异常
+    }
   }
 
   /**

@@ -352,6 +352,7 @@ const {
   submitClarifyAnswers,
   viewDraft,
   init,
+  reset: resetChat,
 } = useChat()
 
 // ── 聊天主体公共逻辑（历史面板/命令补全/发送/上下文/快捷卡片/会话操作/滚动） ──
@@ -390,6 +391,20 @@ function ensureInit() {
   inited.value = true
   init()
 }
+
+// ── 退出登录重置：路由切到 /login 时清空聊天内存态 ──
+watch(
+  () => route.path,
+  (path) => {
+    if (path === "/login") {
+      resetChat()
+      inited.value = false
+      isOpen.value = false
+      showHistory.value = false
+      text.value = ""
+    }
+  }
+)
 
 // ── 控制开关 ──
 function toggle() {

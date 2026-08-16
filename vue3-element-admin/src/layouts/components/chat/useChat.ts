@@ -784,6 +784,30 @@ export function useChat() {
     await Promise.all([loadSessions(), loadSkills()])
   }
 
+  // ── 重置（退出登录时清空所有聊天内存态）──
+  function reset() {
+    sessions.value = []
+    activeSessionId.value = null
+    messages.value = []
+    skills.value = []
+    segments.value = []
+    activeDraft.value = null
+    showDraftPanel.value = false
+    loading.value = false
+    streaming.value = false
+    loadingSessions.value = false
+    loadingMessages.value = false
+    pageContext.value = {}
+    // 停止所有任务状态轮询
+    taskMonitors.forEach((id) => clearInterval(id))
+    taskMonitors.clear()
+    // 中断进行中的流式请求
+    if (abortController) {
+      abortController.abort()
+      abortController = null
+    }
+  }
+
   return {
     // 状态
     sessions,
@@ -821,5 +845,6 @@ export function useChat() {
     loadSkills,
     monitorIncompleteTasks,
     init,
+    reset,
   }
 }
