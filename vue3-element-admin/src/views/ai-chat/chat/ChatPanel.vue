@@ -1,7 +1,8 @@
 <template>
   <div class="ai-chat-panel">
-    <!-- 顶部标题栏 -->
+    <!-- 顶部工具栏：与下方内容融为一体，仅承载操作按钮 -->
     <div class="chat-panel-header">
+      <!-- 历史面板模式：返回 + 删除所有 -->
       <div v-if="showHistory" class="header-title">
         <el-button text @click="showHistory = false">
           <el-icon><ArrowLeft /></el-icon>
@@ -9,23 +10,21 @@
         </el-button>
         <span>历史对话</span>
       </div>
-      <div v-else class="header-title">
-        <div class="header-logo">
-          <el-icon><ChatDotRound /></el-icon>
-        </div>
-        <span>AI 助手</span>
-      </div>
+      <div v-else class="header-spacer"></div>
+
       <div class="header-actions">
         <el-button v-if="showHistory" type="danger" text size="small" @click="onDeleteAll">
           <el-icon><Delete /></el-icon>
           删除所有
         </el-button>
-        <el-button v-if="!showHistory" text circle title="历史对话" @click="showHistory = true">
-          <el-icon><Clock /></el-icon>
-        </el-button>
-        <el-button v-if="!showHistory" text circle title="新对话" @click="newSession">
-          <el-icon><Plus /></el-icon>
-        </el-button>
+        <template v-else>
+          <el-button text circle title="历史对话" @click="showHistory = true">
+            <el-icon><Clock /></el-icon>
+          </el-button>
+          <el-button text circle title="新对话" @click="newSession">
+            <el-icon><Plus /></el-icon>
+          </el-button>
+        </template>
       </div>
     </div>
 
@@ -321,8 +320,8 @@ onMounted(async () => {
   scrollToBottom()
 })
 
-// 暴露滚动方法，供父组件在 keep-alive 激活时调用
-defineExpose({ scrollToBottom, restoreScrollPosition, saveScrollPosition })
+// 暴露方法/状态，供父组件（左侧工作区顶部按钮）调用
+defineExpose({ scrollToBottom, restoreScrollPosition, saveScrollPosition, newSession, showHistory })
 
 // ── 同步上下文到 pageContext（从 aiContextStore 读取） ──
 const aiContextStore = useAiContextStore()
@@ -365,11 +364,12 @@ const { inputHeight, onInputMouseDown } = useInputResize()
   align-items: center;
   justify-content: space-between;
   padding: 8px 12px;
-  border-bottom: 1px solid var(--el-border-color-lighter);
-  background: var(--el-bg-color);
+  /* 与下方内容区融为一体：无边框、无背景差异 */
+  border-bottom: none;
+  background: transparent;
   flex-shrink: 0;
   user-select: none;
-  min-height: 44px;
+  min-height: 40px;
 }
 
 .header-title {
@@ -381,19 +381,9 @@ const { inputHeight, onInputMouseDown } = useInputResize()
   color: var(--el-text-color-primary);
 }
 
-.header-logo {
-  width: 28px;
-  height: 28px;
-  border-radius: 8px;
-  background: var(--el-color-primary);
-  color: #fff;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.header-logo .el-icon {
-  font-size: 16px;
+/* 非历史模式下的占位，保证按钮靠右 */
+.header-spacer {
+  flex: 1;
 }
 
 .header-actions {
