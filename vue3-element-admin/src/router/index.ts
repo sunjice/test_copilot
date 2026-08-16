@@ -100,7 +100,7 @@ export const constantRoutes: RouteRecordRaw[] = [
         path: "ai-chat",
         name: "AiChat",
         component: () => import("@/views/ai-chat/index.vue"),
-        meta: { title: "AI 对话", icon: "el-icon-ChatDotRound", affix: true, keepAlive: true },
+        meta: { title: "Assistant", icon: "el-icon-ChatDotRound", affix: true, keepAlive: true },
       },
     ],
   },

@@ -486,7 +486,8 @@ useContextMenuManager();
   width: 100%;
   height: $tags-view-height;
   padding: 0 12px;
-  background-color: var(--content-bg);
+  /* 标签栏：与顶部导航栏同色，与下方内容区形成层次 */
+  background-color: var(--page-bg);
   border-bottom: 1px solid var(--card-border);
 }
 

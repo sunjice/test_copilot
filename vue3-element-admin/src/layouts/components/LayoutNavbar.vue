@@ -44,7 +44,8 @@ const sidebarState = computed(() =>
   justify-content: space-between;
   height: $navbar-height;
   padding: 0 14px 0 6px;
-  background-color: var(--content-bg);
+  /* 顶部导航栏：使用页面底色，与下方内容区形成层次 */
+  background-color: var(--page-bg);
   border-bottom: 1px solid var(--card-border);
   box-shadow: 0 1px 0 rgb(15 23 42 / 3%);
 
