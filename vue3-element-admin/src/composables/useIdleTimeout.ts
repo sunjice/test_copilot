@@ -1,6 +1,7 @@
 import { onUnmounted, watch } from "vue";
 import { useRoute } from "vue-router";
 import { useUserStoreHook } from "@/stores/user";
+import { redirectToLogin } from "@/utils/auth";
 import { ElMessageBox } from "element-plus";
 
 /** 默认闲置超时 15 分钟 */
@@ -44,8 +45,9 @@ export function useIdleTimeout(timeoutMs: number = IDLE_TIMEOUT_MS) {
       closeOnClickModal: false,
       closeOnPressEscape: false,
     });
-    await userStore.logout();
-    window.location.href = "/login";
+    // 空闲超时场景 token 已过期，不能调用会发请求的 logout()（会命中 401 拦截器引发二次跳转）。
+    // 直接清空本地状态，并通过统一的 redirectToLogin 软跳转登录页。
+    await redirectToLogin("您已长时间未操作，请重新登录");
   }
 
   /** 绑定事件 */
