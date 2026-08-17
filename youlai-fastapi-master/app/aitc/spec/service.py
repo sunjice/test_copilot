@@ -182,7 +182,8 @@ class SpecService:
 
         匹配规则:
         - general / common_issues: 项目级(project_id=当前项目)优先，否则全局(project_id IS NULL)
-        - module_specific: 精确匹配当前模块 suite_id
+        - module_specific: 沿 suite_id 祖先链（含自身，近→远）回溯匹配，
+          命中所有绑定在祖先层级的模块专用规范，按「近→远」排序
         - 仅 status=1 且 content 非空的参与
         - 按 general → module_specific → common_issues 顺序拼接
         """
@@ -196,10 +197,18 @@ class SpecService:
             ).order_by(AiTcSpec.sort_order, AiTcSpec.id)
         )).scalars().all()
 
+        # 祖先链（含自身，近→远），用于 module_specific 回溯匹配
+        ancestor_ids: list[int] = []
+        if suite_id:
+            ancestor_ids = await self._get_ancestor_suite_ids(suite_id)
+
         def pick(spec_type: str) -> list[AiTcSpec]:
             candidates = [s for s in rows if s.spec_type == spec_type]
             if spec_type == "module_specific":
-                return [s for s in candidates if suite_id and s.suite_id == suite_id]
+                matched = [s for s in candidates if suite_id and s.suite_id in ancestor_ids]
+                # 近→远排序：离当前模块越近的祖先规范越靠后（更贴近用例）
+                matched.sort(key=lambda s: ancestor_ids.index(s.suite_id) if s.suite_id in ancestor_ids else len(ancestor_ids))
+                return matched
             project_level = [s for s in candidates if project_id and s.project_id == project_id]
             return project_level or [s for s in candidates if s.project_id is None]
 
@@ -207,6 +216,26 @@ class SpecService:
         ids = [s.id for s in picked]
         parts = [f"【{self.SPEC_TYPE_TITLES.get(s.spec_type, s.spec_type)}】\n{s.content}" for s in picked]
         return ids, "\n\n".join(parts)
+
+    async def _get_ancestor_suite_ids(self, suite_id: int) -> list[int]:
+        """返回 suite_id 自身及其所有祖先 id（近→远，含自己）。
+
+        沿 parent_id 逐级向上回溯，不依赖 tree_path（tree_path 格式历史数据不可靠）。
+        """
+        ids: list[int] = [suite_id]
+        current = suite_id
+        visited: set[int] = set()
+        while current and current not in visited:
+            visited.add(current)
+            row = await self.db.execute(
+                select(AiTcSuite.parent_id).where(AiTcSuite.id == current)
+            )
+            parent_id = row.scalar_one_or_none()
+            if parent_id is None or parent_id == 0:
+                break
+            ids.append(parent_id)
+            current = parent_id
+        return ids
 
     async def load_specs_text(self, spec_ids: list[int]) -> str:
         """根据 ID 加载规范内容并拼接为文本。"""

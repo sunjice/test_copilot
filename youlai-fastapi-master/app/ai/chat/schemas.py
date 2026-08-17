@@ -90,7 +90,7 @@ class ConfirmCreateTaskReq(BaseModel):
     """确认创建任务 — 用户在对话框中点击确认后提交。"""
     skill_name: str = Field(..., description="技能名称，如 core_select")
     project_id: int = Field(..., description="项目ID")
-    suite_id: int = Field(..., description="模块ID")
+    suite_ids: list[int] = Field(..., description="模块ID列表，逐个创建任务")
     case_ids: list[int] | None = Field(default=None, description="指定用例ID列表，为空则处理整个模块")
     selected_option: str | None = Field(default=None, description="用户选中的选项ID")
     card_seq: int | None = Field(default=None, description="卡片序号（多卡片并行时精确定位，缺省回退最后一张）")

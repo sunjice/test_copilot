@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.dependencies import get_current_user
-from app.response import Result
+from app.response import Result, ResultCode
 from app.auth.schemas import SysUserDetails
 from app.ai.chat.usecases import ChatUseCase
 from app.ai.config import resolve_ai_config
@@ -267,30 +267,48 @@ async def confirm_create_task(
     db: AsyncSession = Depends(get_db),
     user: SysUserDetails = Depends(get_current_user),
 ):
-    """用户在对话框中确认创建任务。"""
+    """用户在对话框中确认创建任务（支持多模块，逐个创建）。"""
     usecase = ChatUseCase(db)
-
-    # 创建任务
     engine = TaskEngine(db)
-    task_vo = await engine.create_task(
-        TaskCreate(
-            task_type=req.skill_name,
-            project_id=req.project_id,
-            suite_id=req.suite_id,
-            case_ids=req.case_ids,
-            session_id=session_id,
-        ),
-        create_by=user.username,
-    )
+
+    # 去子孙：级联勾选会带出「父+子」，只保留最顶层节点，避免重复处理
+    from app.ai.agent.skills.case.tools import keep_topmost_suites
+    suite_ids = await keep_topmost_suites(db, req.suite_ids)
+
+    # 逐个模块创建任务（方案B：跳过失败模块，返回成功列表 + 失败摘要）
+    task_ids: list[int] = []
+    total_count = 0
+    failed: list[dict] = []
+    for sid in suite_ids:
+        try:
+            task_vo = await engine.create_task(
+                TaskCreate(
+                    task_type=req.skill_name,
+                    project_id=req.project_id,
+                    suite_id=sid,
+                    case_ids=req.case_ids,
+                    session_id=session_id,
+                ),
+                create_by=user.username,
+            )
+            task_ids.append(task_vo.id)
+            total_count += task_vo.total_count
+        except Exception as e:  # noqa: BLE001 — 单模块失败不阻断其它模块
+            failed.append({"suite_id": sid, "error": str(getattr(e, "msg", None) or e)})
+
+    if not task_ids and failed:
+        return Result(code=ResultCode.PARAM_VALID_FAIL, msg="所有模块均创建任务失败", data={
+            "task_ids": [],
+            "total_count": 0,
+            "failed": failed,
+        })
 
     # 回写卡片 part，标记已确认并内嵌任务信息
-    # （任务进度直接展示在确认卡片中，不再单独写 task_card 消息）
     confirm_meta: dict = {
         "state": "confirmed",
-        "task_id": task_vo.id,
-        "task_status": 0,
-        "done_count": 0,
-        "total_count": task_vo.total_count,
+        "task_ids": task_ids,
+        "total_count": total_count,
+        "failed": failed or None,
     }
     if req.selected_option:
         confirm_meta["selected_option"] = req.selected_option
@@ -302,6 +320,7 @@ async def confirm_create_task(
     )
 
     return Result(data={
-        "task_id": task_vo.id,
-        "total_count": task_vo.total_count,
+        "task_ids": task_ids,
+        "total_count": total_count,
+        "failed": failed or None,
     })

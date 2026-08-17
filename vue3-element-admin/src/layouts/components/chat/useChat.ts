@@ -549,7 +549,8 @@ export function useChat() {
     taskMonitors.clear()
   })
 
-  /** 更新任务状态：定位 parts 里的 confirm_card part（按 task_id 匹配） */
+  /** 更新任务状态：定位 parts 里的 confirm_card part（按 task_id 或 task_ids 匹配）。
+   *  多任务卡片（task_ids 数组）时聚合各任务进度到同一张卡片。 */
   function updateConfirmCardTaskStatus(taskId: number, status: number, done: number, total: number) {
     for (let i = messages.value.length - 1; i >= 0; i--) {
       const m = messages.value[i]
@@ -557,11 +558,29 @@ export function useChat() {
       if (!Array.isArray(parts)) continue
       let changed = false
       const newParts = parts.map((p: any) => {
-        if (p?.type === "confirm_card" && p.card?.task_id === taskId) {
-          changed = true
-          return { ...p, card: { ...p.card, task_status: status, done_count: done, total_count: total } }
+        if (p?.type !== "confirm_card") return p
+        const card = p.card || {}
+        const ids: number[] = card.task_ids || (card.task_id != null ? [card.task_id] : [])
+        if (!ids.includes(Number(taskId))) return p
+        changed = true
+
+        // 多任务：维护每个任务的进度快照并聚合；单任务：直接使用本次进度
+        if (ids.length > 1) {
+          const progress = { ...(card._task_progress || {}) }
+          progress[taskId] = { status, done, total }
+          const vals = Object.values(progress) as Array<{ status: number; done: number; total: number }>
+          const aggDone = vals.reduce((s, v) => s + (v.done || 0), 0)
+          const aggTotal = vals.reduce((s, v) => s + (v.total || 0), 0)
+          const allDone = vals.length === ids.length && vals.every((v) => v.status >= 2)
+          const anyFailed = vals.some((v) => v.status === 3)
+          const aggStatus = allDone ? (anyFailed ? 3 : 2) : (vals.some((v) => v.status >= 1) ? 1 : 0)
+          return {
+            ...p,
+            card: { ...card, _task_progress: progress, task_status: aggStatus, done_count: aggDone, total_count: aggTotal },
+          }
         }
-        return p
+
+        return { ...p, card: { ...card, task_status: status, done_count: done, total_count: total } }
       })
       if (changed) {
         messages.value[i] = {
@@ -608,33 +627,36 @@ export function useChat() {
       for (let pi = 0; pi < parts.length; pi++) {
         const p = parts[pi] as any
         if (p?.type !== "confirm_card") continue
-        const taskId = p.card?.task_id
-        if (!taskId) continue
+        const taskIds: number[] = p.card?.task_ids || (p.card?.task_id != null ? [p.card.task_id] : [])
+        if (!taskIds.length) continue
         const ts = p.card?.task_status
 
-        // 已完成/失败但缺少计数，从服务端补齐
-        if (ts != null && ts >= 2) {
-          if ((p.card?.done_count ?? 0) === 0 && (p.card?.total_count ?? 0) === 0) {
-            try {
-              const detail = await TaskAPI.getDetail(String(taskId))
-              const task = detail.task
-              updateConfirmCardTaskStatus(taskId, task.status, task.done_count ?? 0, task.total_count ?? 0)
-            } catch { /* 静默 */ }
+        // 逐个任务补齐/监控
+        for (const taskId of taskIds) {
+          // 已完成/失败但缺少计数，从服务端补齐
+          if (ts != null && ts >= 2) {
+            if ((p.card?.done_count ?? 0) === 0 && (p.card?.total_count ?? 0) === 0) {
+              try {
+                const detail = await TaskAPI.getDetail(String(taskId))
+                const task = detail.task
+                updateConfirmCardTaskStatus(taskId, task.status, task.done_count ?? 0, task.total_count ?? 0)
+              } catch { /* 静默 */ }
+            }
+            continue
           }
-          continue
-        }
 
-        // 未完成任务，启动监控
-        if (taskMonitors.has(taskId)) continue
-        try {
-          const detail = await TaskAPI.getDetail(String(taskId))
-          const task = detail.task
-          updateConfirmCardTaskStatus(taskId, task.status, task.done_count ?? 0, task.total_count ?? 0)
-          if (task.status >= 2) continue
-          const skillName = p.card?.skill_name || p.card?.task_type || ""
-          startTaskMonitor(taskId, skillName)
-        } catch {
-          // 静默处理
+          // 未完成任务，启动监控
+          if (taskMonitors.has(taskId)) continue
+          try {
+            const detail = await TaskAPI.getDetail(String(taskId))
+            const task = detail.task
+            updateConfirmCardTaskStatus(taskId, task.status, task.done_count ?? 0, task.total_count ?? 0)
+            if (task.status >= 2) continue
+            const skillName = p.card?.skill_name || p.card?.task_type || ""
+            startTaskMonitor(taskId, skillName)
+          } catch {
+            // 静默处理
+          }
         }
       }
     }
@@ -646,7 +668,7 @@ export function useChat() {
     const sessionId = activeSessionId.value
     const skillName = metadata.skill_name || ""
     const projectId = metadata.project_id
-    const suiteId = metadata.suite_id
+    const suiteIds: number[] = metadata.suite_ids ?? (metadata.suite_id != null ? [metadata.suite_id] : [])
     const caseIds: number[] | undefined = metadata.case_ids ?? undefined
     const selectedOption = metadata.selected_option as string | undefined
     const cardSeq = (metadata.card_seq as number | null | undefined) ?? null
@@ -655,31 +677,35 @@ export function useChat() {
       const res = await ChatTaskAPI.confirmCreate(sessionId, {
         skill_name: skillName,
         project_id: projectId,
-        suite_id: suiteId,
+        suite_ids: suiteIds,
         case_ids: caseIds ?? null,
         selected_option: selectedOption ?? null,
         card_seq: cardSeq,
       })
 
-      const taskId = res.task_id
+      const taskIds: number[] = res.task_ids ?? (res.task_id != null ? [res.task_id] : [])
       const total = res.total_count ?? metadata.total ?? 0
 
       // 回写本地卡片 part：标记已确认 + 写入任务字段
       updateCardStatusInMessages(cardSeq, "confirmed", selectedOption, {
-        task_id: taskId,
-        task_status: 0,
-        done_count: 0,
+        task_ids: taskIds,
         total_count: total,
+        failed: res.failed ?? null,
       })
 
       await loadSessions()
 
-      // 启动任务状态轮询
-      if (taskId) {
-        startTaskMonitor(taskId, skillName)
-      }
+      // 逐个启动任务状态轮询
+      taskIds.forEach((taskId) => {
+        if (taskId) startTaskMonitor(taskId, skillName)
+      })
 
-      ElMessage.success("任务已创建")
+      const failedCount = res.failed?.length ?? 0
+      if (failedCount) {
+        ElMessage.warning(`已创建 ${taskIds.length} 个任务，${failedCount} 个模块创建失败`)
+      } else {
+        ElMessage.success(`已创建 ${taskIds.length} 个任务`)
+      }
     } catch (e: any) {
       ElMessage.error(`创建任务失败: ${e.message || e}`)
       throw e

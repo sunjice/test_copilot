@@ -333,7 +333,9 @@ export function useCasePage() {
         projectId: selectedProjectId.value ? Number(selectedProjectId.value) : null,
         projectName: selectedProjectName.value || null,
         suiteId: selectedSuiteId.value ? Number(selectedSuiteId.value) : null,
+        suiteIds: selectedSuiteId.value ? [Number(selectedSuiteId.value)] : null,
         suiteName: selectedSuiteName.value || null,
+        suiteNames: selectedSuiteName.value ? [selectedSuiteName.value] : null,
         selectedCaseIds: selectedIds.value.map((id) => Number(id)),
         currentCaseId: currentCaseId.value != null ? Number(currentCaseId.value) : null,
       });

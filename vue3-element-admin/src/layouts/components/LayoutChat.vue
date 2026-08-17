@@ -433,7 +433,10 @@ watch(
     const ctx: Record<string, any> = {}
     const { projectId, suiteId } = route.query
     if (projectId) ctx.project_id = Number(projectId)
-    if (suiteId) ctx.suite_id = Number(suiteId)
+    if (suiteId) {
+      ctx.suite_id = Number(suiteId)
+      ctx.suite_ids = [Number(suiteId)]
+    }
     if (route.meta?.projectId) ctx.project_id = Number(route.meta.projectId)
     // Store 里的 current_page / project_id / suite_id 等始终合并进来
     // route.query 优先级更高（已设置过的字段不再被 Store 覆盖）

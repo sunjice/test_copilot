@@ -89,18 +89,28 @@ class TaskStore:
         return row.scalar_one_or_none() is not None
 
     async def get_subtree_case_ids(self, suite_id: int) -> list[int]:
-        """获取指定套件及其所有子套件的用例 ID 列表。"""
+        """获取指定套件及其所有子套件的用例 ID 列表。
+
+        纯 parent_id 递归（不依赖 tree_path，因 tree_path 格式历史数据不可靠）。
+        """
         suite = await self.db.get(AiTcSuite, suite_id)
         if suite is None:
             return []
-        prefix = f"{suite.tree_path}{suite_id},"
-        suite_rows = await self.db.execute(
-            select(AiTcSuite.id).where(
-                AiTcSuite.tree_path.like(f"{prefix}%"),
-                AiTcSuite.is_deleted == 0,
+        # parent_id 递归收集子树套件
+        all_suite_ids: list[int] = [suite_id]
+        current: list[int] = [suite_id]
+        while current:
+            rows = await self.db.execute(
+                select(AiTcSuite.id).where(
+                    AiTcSuite.parent_id.in_(current),
+                    AiTcSuite.is_deleted == 0,
+                )
             )
-        )
-        all_suite_ids = [suite_id] + [r[0] for r in suite_rows]
+            children = [r[0] for r in rows]
+            if not children:
+                break
+            all_suite_ids.extend(children)
+            current = children
         case_rows = await self.db.execute(
             select(AiTcCase.id).where(
                 AiTcCase.suite_id.in_(all_suite_ids),

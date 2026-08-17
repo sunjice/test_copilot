@@ -105,9 +105,11 @@ class PromptManager:
 
     def _build_page_context(self, context: SessionContext) -> str:
         project_id = context.project_id
-        suite_id = context.suite_id
+        suite_ids = context.suite_ids or []
         project_name = context.context_json.get("project_name", "")
-        suite_name = context.context_json.get("suite_name", "")
+        suite_names = context.context_json.get("suite_names") or []
+        if not suite_names and context.context_json.get("suite_name"):
+            suite_names = [context.context_json.get("suite_name")]
         selected_case_ids = context.context_json.get("selected_case_ids", [])
         current_case_id = context.context_json.get("current_case_id")
 
@@ -115,9 +117,14 @@ class PromptManager:
         if project_id:
             name_part = f" {project_name}" if project_name else ""
             lines.append(f"- 项目：{project_id}{name_part}")
-        if suite_id:
-            name_part = f" {suite_name}" if suite_name else ""
-            lines.append(f"- 模块：{suite_id}{name_part}")
+        if suite_ids:
+            if len(suite_ids) == 1:
+                name_part = f" {suite_names[0]}" if suite_names else ""
+                lines.append(f"- 模块：{suite_ids[0]}{name_part}")
+            else:
+                ids_str = ", ".join(str(i) for i in suite_ids)
+                names_str = "、".join(str(n) for n in suite_names) if suite_names else ""
+                lines.append(f"- 模块（{len(suite_ids)} 个）：{names_str}（ID: {ids_str}）")
         if current_case_id:
             lines.append(f"- 当前查看的用例 ID：{current_case_id}")
         if selected_case_ids:

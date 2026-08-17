@@ -10,8 +10,10 @@ from app.aitc.models import AiTcCase, AiTcSuite
 from app.ai.chat.context_builder import BaseContextBuilder, context_builder_registry
 from app.ai.agent.skills.case.tools import (
     _get_project_name,
-    _get_suite_name,
-    _count_cases_in_suite,
+    resolve_suite_ids,
+    get_suite_names,
+    count_cases_in_suites,
+    _get_subtree_suite_ids,
 )
 
 
@@ -22,7 +24,6 @@ class CaseContextBuilder(BaseContextBuilder):
 
     async def build(self, context_json: dict, db: AsyncSession) -> str:
         project_id = context_json.get("project_id")
-        suite_id = context_json.get("suite_id")
         selected_case_ids = context_json.get("selected_case_ids", [])
 
         parts: list[str] = []
@@ -32,18 +33,29 @@ class CaseContextBuilder(BaseContextBuilder):
             project_name = await _get_project_name(db, project_id)
             parts.append(f"- 项目: {project_name or f'ID:{project_id}'}")
 
-        # 模块名 + 用例统计 + 用例列表
-        if suite_id:
-            suite_name = await _get_suite_name(db, suite_id)
-            case_count = await _count_cases_in_suite(db, suite_id)
-            parts.append(f"- 模块: {suite_name or f'ID:{suite_id}'}（{case_count} 条用例）")
+        # 模块名 + 用例统计 + 用例列表（支持多模块）
+        suite_ids = await resolve_suite_ids(
+            db, context_json, context_json.get("suite_id")
+        )
+        if suite_ids:
+            suite_names = await get_suite_names(db, suite_ids)
+            total_count = await count_cases_in_suites(db, suite_ids)
+            if len(suite_ids) == 1:
+                parts.append(f"- 模块: {suite_names[0] or f'ID:{suite_ids[0]}'}（{total_count} 条用例）")
+            else:
+                names = "、".join(suite_names) if suite_names else str(suite_ids)
+                parts.append(f"- 模块（{len(suite_ids)} 个）: {names}（共 {total_count} 条用例）")
 
-            # 注入模块下（含子模块）所有用例的编号和名称
-            cases = await self._get_case_list_in_suite(db, suite_id, limit=200)
+            # 注入模块下（含子模块）所有用例的编号和名称（多模块时合并，总上限 200）
+            cases: list[tuple[int, str]] = []
+            for sid in suite_ids:
+                if len(cases) >= 200:
+                    break
+                cases.extend(await self._get_case_list_in_suite(db, sid, limit=200 - len(cases)))
             if cases:
                 lines = "\n".join(f"  - #{case_id}: {name}" for case_id, name in cases)
                 parts.append(f"- 用例列表：\n{lines}")
-                if case_count > len(cases):
+                if total_count > len(cases):
                     parts.append(f"  （仅展示前 {len(cases)} 条）")
 
         # 当前选中用例概览
@@ -61,19 +73,12 @@ class CaseContextBuilder(BaseContextBuilder):
     async def _get_case_list_in_suite(
         db: AsyncSession, suite_id: int, limit: int = 200
     ) -> list[tuple[int, str]]:
-        """获取模块及其子模块下的用例列表（编号+名称），按 ID 排序。"""
+        """获取模块及其子模块下的用例列表（编号+名称），按 ID 排序（parent_id 递归）。"""
         suite = await db.get(AiTcSuite, suite_id)
         if suite is None or suite.is_deleted:
             return []
 
-        prefix = f"{suite.tree_path}{suite_id},"
-        suite_rows = await db.execute(
-            select(AiTcSuite.id).where(
-                AiTcSuite.tree_path.like(f"{prefix}%"),
-                AiTcSuite.is_deleted == 0,
-            )
-        )
-        all_suite_ids = [suite_id] + [r[0] for r in suite_rows]
+        all_suite_ids = await _get_subtree_suite_ids(db, suite_id)
 
         result = await db.execute(
             select(AiTcCase.id, AiTcCase.name)

@@ -9,9 +9,9 @@
           <span class="chip-label">项目</span>
           <span class="chip-value">{{ card.project_name }}</span>
         </span>
-        <span v-if="card.suite_name" class="chip">
+        <span v-if="suiteDisplay" class="chip">
           <span class="chip-label">模块</span>
-          <span class="chip-value">{{ card.suite_name }}</span>
+          <span class="chip-value">{{ suiteDisplay }}</span>
         </span>
         <span v-if="taskLabel" class="chip">
           <span class="chip-label">任务类型</span>
@@ -53,7 +53,7 @@
 
     <!-- confirmed 状态：进度条 -->
     <div
-      v-if="state === 'confirmed' && taskId != null && taskStatus < 2"
+      v-if="state === 'confirmed' && hasTaskIds && taskStatus < 2"
       class="confirm-progress"
     >
       <el-progress
@@ -106,8 +106,15 @@ const selected = ref<string>(props.card.selected_option || props.card.options?.[
 
 const state = computed(() => props.card.state || "idle")
 const hasStructured = computed(
-  () => !!(props.card.project_name || props.card.suite_name || props.card.task_type || props.card.total != null)
+  () => !!(props.card.project_name || props.card.suite_name || props.card.suite_names?.length || props.card.task_type || props.card.total != null)
 )
+
+// 模块名展示：优先用 suite_names 数组，回退单数 suite_name
+const suiteDisplay = computed(() => {
+  const names = props.card.suite_names || (props.card.suite_name ? [props.card.suite_name] : [])
+  if (!names.length) return ""
+  return names.join("、")
+})
 
 const SKILL_LABELS: Record<string, string> = {
   core_select: "挑选核心用例",
@@ -122,7 +129,13 @@ const taskLabel = computed(() => {
   return SKILL_LABELS[raw] || raw
 })
 
-const taskId = computed(() => (props.card.task_id != null ? Number(props.card.task_id) : null))
+// 单任务用 task_id；多任务（task_ids.length > 1）返回 null → 跳任务列表
+const taskIds = computed(() => props.card.task_ids || (props.card.task_id != null ? [props.card.task_id] : []))
+const hasTaskIds = computed(() => taskIds.value.length > 0)
+const taskId = computed(() => {
+  if (taskIds.value.length === 1) return Number(taskIds.value[0])
+  return null
+})
 const taskStatus = computed(() => (props.card.task_status != null ? Number(props.card.task_status) : 0))
 
 const TASK_STATUS_LABELS: Record<number, string> = {
@@ -163,9 +176,8 @@ function onCancel() {
 }
 
 function onViewTask() {
-  if (taskId.value != null) {
-    emit("viewTask", taskId.value)
-  }
+  // 单任务传 taskId 跳详情；多任务传 0 → 父组件 onViewTask 跳任务列表
+  emit("viewTask", taskId.value ?? 0)
 }
 </script>
 

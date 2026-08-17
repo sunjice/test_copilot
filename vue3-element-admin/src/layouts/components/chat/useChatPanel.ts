@@ -262,8 +262,14 @@ export function useChatPanel(deps: {
     if (ctx.project_name || ctx.project_id) {
       items.push({ label: ctx.project_name || `项目 #${ctx.project_id}`, icon: FolderChecked })
     }
-    if (ctx.suite_name || ctx.suite_id) {
-      items.push({ label: ctx.suite_name || `模块 #${ctx.suite_id}`, icon: Collection })
+    const suiteNames: string[] = ctx.suite_names || (ctx.suite_name ? [ctx.suite_name] : [])
+    if (suiteNames.length) {
+      const MAX = 24 // 展示模块名总长度上限，避免过长
+      let text = suiteNames.join("、")
+      if (text.length > MAX) {
+        text = text.slice(0, MAX) + `…（共 ${suiteNames.length} 个模块）`
+      }
+      items.push({ label: text, icon: Collection })
     }
     if (ctx.current_case_id) {
       items.push({ label: `用例 #${ctx.current_case_id}`, icon: DocumentChecked })

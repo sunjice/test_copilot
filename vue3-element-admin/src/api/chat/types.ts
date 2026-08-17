@@ -85,7 +85,7 @@ export interface SkillInfo {
 export interface ConfirmCreateTaskReq {
   skill_name: string
   project_id: number
-  suite_id: number
+  suite_ids: number[]
   case_ids?: number[] | null
   selected_option?: string | null
   /** 卡片序号（多卡片并行时精确定位，缺省回退最后一张） */
@@ -152,6 +152,8 @@ export interface ConfirmCardData {
   msg_type?: string
   project_name?: string
   suite_name?: string
+  suite_names?: string[]
+  suite_ids?: number[]
   task_type?: string
   task_label?: string
   skill_name?: string
@@ -161,10 +163,15 @@ export interface ConfirmCardData {
   state?: "idle" | "confirmed" | "cancelled"
   /** 任务进度（确认后由轮询更新） */
   task_id?: number | null
+  task_ids?: number[]
   task_status?: number
   done_count?: number
   total_count?: number
   selected_option?: string | null
+  /** 多模块创建失败摘要 */
+  failed?: Array<{ suite_id: number; error: string }> | null
+  /** 内部字段：多任务进度快照（taskId -> 进度），仅前端运行时使用 */
+  _task_progress?: Record<number, { status: number; done: number; total: number }>
 }
 
 // 向后兼容别名（部分旧代码仍引用 Segment 名称）

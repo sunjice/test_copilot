@@ -160,8 +160,9 @@ export const ChatSkillAPI = {
 // ═══════════════ 任务确认 ═══════════════
 
 export interface ConfirmCreateTaskRes {
-  task_id: number
+  task_ids: number[]
   total_count: number
+  failed?: Array<{ suite_id: number; error: string }> | null
 }
 
 export const ChatTaskAPI = {

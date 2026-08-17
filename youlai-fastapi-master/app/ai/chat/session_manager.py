@@ -41,6 +41,15 @@ class SessionContext:
     def suite_id(self) -> int | None:
         return self.context_json.get("suite_id")
 
+    @property
+    def suite_ids(self) -> list[int] | None:
+        """多模块 ID 列表，兼容旧单数 suite_id。"""
+        ids = self.context_json.get("suite_ids")
+        if ids:
+            return [int(i) for i in ids]
+        sid = self.context_json.get("suite_id")
+        return [int(sid)] if sid else None
+
     def update_context(self, domain: str | None = None, context_json: dict | None = None):
         """更新页面上下文。"""
         if domain is not None:

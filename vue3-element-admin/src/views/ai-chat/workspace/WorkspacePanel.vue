@@ -202,18 +202,12 @@ function emitContext() {
     ctx.projectId = null
     ctx.projectName = ""
   }
-  if (selectedSuites.value.length === 1) {
-    ctx.suiteId = selectedSuites.value[0].id
-    ctx.suiteName = selectedSuites.value[0].label
-  } else if (selectedSuites.value.length > 1) {
-    ctx.suiteId = null
-    ctx.suiteName = ""
-    ctx.suiteIds = selectedSuites.value.map((s) => s.id)
-  } else {
-    ctx.suiteId = null
-    ctx.suiteName = ""
-    ctx.suiteIds = null
-  }
+  const suiteIds = selectedSuites.value.map((s) => s.id)
+  ctx.suiteIds = suiteIds.length ? suiteIds : null
+  // 单数字段降级为「数组第一个元素」的派生值，向后兼容老链路（只读 suite_id 的地方）
+  ctx.suiteId = suiteIds.length ? suiteIds[0] : null
+  ctx.suiteName = suiteIds.length === 1 ? selectedSuites.value[0].label : ""
+  ctx.suiteNames = selectedSuites.value.map((s) => s.label)
   if (selectedCases.value.length) {
     ctx.selectedCaseIds = selectedCases.value.map((c) => c.id)
   } else {

@@ -5,7 +5,8 @@ ASYNC 模式：返回确认卡片，用户确认后创建后台批量任务。
 
 from app.ai.agent.skills.base import BaseSkill, SkillMode, SkillResult, skill_registry
 from app.ai.agent.skills.case.tools import (
-    _count_cases_in_suite, _get_project_name, _get_suite_name, resolve_scope,
+    _get_project_name, resolve_scope,
+    resolve_suite_ids, get_suite_names, count_cases_in_suites,
 )
 from app.aitc.constants import TaskType
 
@@ -35,7 +36,6 @@ class CaseCompleteSkill(BaseSkill):
 
     async def execute(self, params: dict, context: dict) -> SkillResult:
         project_id = params.get("project_id") or context.get("project_id")
-        suite_id = params.get("suite_id") or context.get("suite_id")
         case_ids = params.get("case_ids")  # LLM 传入的目标用例 ID
         scope = params.get("scope")  # "all" | "selected" | None（case_ids 未传时使用）
         context_json = context.get("context_json", {})
@@ -43,7 +43,11 @@ class CaseCompleteSkill(BaseSkill):
         raw_current_case_id = context_json.get("current_case_id") if context_json else None
         db = context.get("db_session")
 
-        if not project_id or not suite_id:
+        suite_ids = await resolve_suite_ids(
+            db, context_json,
+            params.get("suite_id") or context.get("suite_id"),
+        )
+        if not project_id or not suite_ids:
             return SkillResult(
                 success=False,
                 msg_type="clarify_card",
@@ -51,7 +55,7 @@ class CaseCompleteSkill(BaseSkill):
                 error="缺少 project_id 或 suite_id",
             )
 
-        total = await _count_cases_in_suite(db, int(suite_id))
+        total = await count_cases_in_suites(db, suite_ids)
 
         if total == 0:
             return SkillResult(
@@ -67,17 +71,17 @@ class CaseCompleteSkill(BaseSkill):
             target_case_ids = None  # None = 模块全部用例，由 task 侧处理
         else:
             target_case_ids = await resolve_scope(
-                db, int(suite_id), raw_selected_case_ids, raw_current_case_id,
+                db, suite_ids[0], raw_selected_case_ids, raw_current_case_id,
             )
 
         scope_total = len(target_case_ids) if target_case_ids else total
 
         project_name = await _get_project_name(db, int(project_id))
-        suite_name = await _get_suite_name(db, int(suite_id))
+        suite_names = await get_suite_names(db, suite_ids)
         task_type_label = TaskType.labels().get(TaskType.CASE_COMPLETE, "补全用例字段")
 
         scope_desc = (
-            f"当前模块全部 {scope_total} 条"
+            f"所选模块全部 {scope_total} 条"
             if target_case_ids is None
             else f"{'指定的' if case_ids else '已选中的'} {scope_total} 条"
         )
@@ -90,11 +94,12 @@ class CaseCompleteSkill(BaseSkill):
             if len(target_case_ids) > 10:
                 case_list_preview += f"\n- ... 等共 {scope_total} 条"
 
+        suite_display = "、".join(suite_names) if suite_names else str(suite_ids)
         content = (
             f"即将创建**{task_type_label}**任务，将对{scope_desc}用例"
             f"逐条参考样本用例补全字段（测试思想、前置条件、测试数据、拓扑、测试步骤），请确认以下信息：\n\n"
             f"| 项目 | {project_name} |\n"
-            f"| 模块 | {suite_name} |\n"
+            f"| 模块 | {suite_display}（共 {len(suite_ids)} 个，将分别创建任务） |\n"
             f"| 任务类型 | {task_type_label} |\n"
             f"| 用例数量 | {scope_total} 条 |\n"
         )
@@ -109,10 +114,10 @@ class CaseCompleteSkill(BaseSkill):
                 "skill_name": self.name,
                 "task_type": TaskType.CASE_COMPLETE.value,
                 "project_id": int(project_id),
-                "suite_id": int(suite_id),
+                "suite_ids": suite_ids,
+                "suite_names": suite_names,
                 "case_ids": target_case_ids,
                 "project_name": project_name,
-                "suite_name": suite_name,
                 "total": scope_total,
             },
         )
