@@ -35,6 +35,7 @@ export function useChatPanel(deps: {
   confirmCreateTask: (metadata: Record<string, any>) => Promise<void>
   cancelTask: (metadata: Record<string, any>) => Promise<void>
   submitClarifyAnswers: (answers: Record<string, string>) => void
+  cancelClarify: () => void
   viewDraft: (id: number) => void
   // 本地 ref
   text: Ref<string>
@@ -44,7 +45,7 @@ export function useChatPanel(deps: {
     sessions, activeSessionId, messages, skills, streaming, segments, pageContext,
     createSession, selectSession, updateSession, deleteSession,
     sendMessage, stopGeneration, retryLastMessage, confirmDraft, confirmCreateTask, cancelTask,
-    submitClarifyAnswers, viewDraft,
+    submitClarifyAnswers, cancelClarify, viewDraft,
     text, msgListRef,
   } = deps
 
@@ -345,6 +346,9 @@ export function useChatPanel(deps: {
     await sendMessage(text)
     submitClarifyAnswers(answers)
   }
+  function onCancelClarify() {
+    cancelClarify()
+  }
 
   // ── 滚动控制 ──
   const userScrolledUp = ref(false)
@@ -398,7 +402,7 @@ export function useChatPanel(deps: {
     // 会话操作
     newSession,
     // 草稿/任务/澄清
-    onViewDraft, onConfirmDraft, onConfirmTask, onCancelTask, onSubmitClarify,
+    onViewDraft, onConfirmDraft, onConfirmTask, onCancelTask, onSubmitClarify, onCancelClarify,
     // 滚动
     userScrolledUp, showScrollBottom, onMsgScroll, scrollToBottom,
   }

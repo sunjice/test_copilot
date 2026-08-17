@@ -132,13 +132,19 @@
                 />
               </div>
             </div>
-            <div v-if="!clarifySubmitted" class="card-actions">
+            <div v-if="!clarifySubmitted && !clarifyCancelled" class="card-actions">
               <el-button size="small" type="primary" :loading="clarifySubmitting" @click="handleClarifySubmit">
                 提交
               </el-button>
+              <el-button size="small" plain @click="handleClarifyCancel">
+                取消
+              </el-button>
+            </div>
+            <div v-else-if="clarifySubmitted" class="card-result muted">
+              {{ clarifyAnswersSummary || '已提交' }}
             </div>
             <div v-else class="card-result muted">
-              {{ clarifyAnswersSummary || '已提交' }}
+              已取消
             </div>
           </div>
 
@@ -213,6 +219,7 @@ const emit = defineEmits<{
   confirmTask: [metadata: Record<string, any>]
   cancelTask: [metadata: Record<string, any>]
   submitClarify: [text: string, answers: Record<string, string>]
+  cancelClarify: []
   viewTask: [taskId: number]
   retry: []
 }>()
@@ -259,6 +266,11 @@ const clarifySubmitting = ref(false)
 /** 是否已提交：优先从 metadata 中读取（历史消息恢复），其次用本地 ref */
 const clarifySubmitted = computed(() => {
   return props.msg.metadata_json?.clarify_status === "submitted"
+})
+
+/** 是否已取消 */
+const clarifyCancelled = computed(() => {
+  return props.msg.metadata_json?.clarify_status === "cancelled"
 })
 
 /** 已提交时显示的答案汇总 */
@@ -317,6 +329,10 @@ function handleClarifySubmit() {
   emit("submitClarify", text, resolved)
 }
 
+function handleClarifyCancel() {
+  emit("cancelClarify")
+}
+
 // ── 确认卡片 part 事件转发（卡片由 TurnRenderer 里的 ConfirmCard 渲染） ──
 function handleConfirmTaskPart(card: ConfirmCardData) {
   emit("confirmTask", card as unknown as Record<string, any>)
@@ -333,7 +349,7 @@ function handleClarifySubmitPart(text: string, answers: Record<string, string>) 
   emit("submitClarify", text, answers)
 }
 function handleClarifyCancelPart() {
-  // 取消澄清：不触发任何操作，仅前端 UI 反馈
+  emit("cancelClarify")
 }
 
 const taskButtonText = computed(() => {

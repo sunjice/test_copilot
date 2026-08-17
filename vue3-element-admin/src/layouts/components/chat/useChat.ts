@@ -770,6 +770,31 @@ export function useChat() {
     }
   }
 
+  /** 将最后一条 clarify_card 标记为已取消并持久化 */
+  async function cancelClarify() {
+    // 本地更新
+    for (let i = messages.value.length - 1; i >= 0; i--) {
+      const m = messages.value[i]
+      if (m.msg_type === "clarify_card" && !m.metadata_json?.clarify_status) {
+        messages.value[i] = {
+          ...m,
+          metadata_json: {
+            ...(m.metadata_json || {}),
+            clarify_status: "cancelled",
+          },
+        }
+        break
+      }
+    }
+    // 持久化到后端
+    if (activeSessionId.value) {
+      ChatMessageAPI.updateCardStatus(activeSessionId.value, {
+        msg_type: "clarify_card",
+        metadata: { clarify_status: "cancelled" },
+      }).catch(() => {})
+    }
+  }
+
   // ── 技能 ──
   async function loadSkills() {
     try {
@@ -818,6 +843,7 @@ export function useChat() {
     confirmCreateTask,
     cancelTask,
     submitClarifyAnswers,
+    cancelClarify,
     loadSkills,
     monitorIncompleteTasks,
     init,

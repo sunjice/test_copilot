@@ -103,6 +103,7 @@
           @confirm-task="onConfirmTask"
           @cancel-task="onCancelTask"
           @submit-clarify="onSubmitClarify"
+          @cancel-clarify="onCancelClarify"
           @view-task="onViewTask"
           @retry="onRetry"
         />
@@ -276,7 +277,7 @@ const {
   showContextBar, welcomeTitle, contextBarItems, inputPlaceholder,
   quickActions, onQuickSend,
   newSession,
-  onViewDraft, onConfirmDraft, onConfirmTask, onCancelTask, onSubmitClarify,
+  onViewDraft, onConfirmDraft, onConfirmTask, onCancelTask, onSubmitClarify, onCancelClarify,
   userScrolledUp, showScrollBottom, onMsgScroll, scrollToBottom,
 } = useChatPanel({
   sessions, activeSessionId, messages, skills, streaming, segments, pageContext,
