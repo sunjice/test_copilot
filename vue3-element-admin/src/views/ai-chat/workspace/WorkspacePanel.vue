@@ -166,8 +166,10 @@ function onTreeCheck(_data: any, _info: any) {
   )
 
   // 用例（叶子）
+  // 后端构造用例树节点时用负数 id（-cid）区分套件节点，
+  // 这里还原为正数，保证传给 LLM / 后端的 selected_case_ids 是真实用例 id
   selectedCases.value = checkedLeaves.map((n: any) => ({
-    id: n.id,
+    id: Math.abs(Number(n.id)),
     label: `${n.project_prefix || ""}${n.external_id || ""} ${n.name}`.trim(),
   }))
 
