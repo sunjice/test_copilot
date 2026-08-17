@@ -65,7 +65,18 @@ const answers = reactive<Record<string, string>>({})
 for (const q of questions) answers[q.id] = ""
 
 function onSubmit() {
-  emit("submit", props.card.content || "", { ...answers })
+  // 把答案组织成可读文本，作为 user 消息发给 LLM（与 ChatMessage 内 clarify 提交逻辑一致）
+  const lines = questions.map((q) => {
+    const raw = answers[q.id] || ""
+    let display = raw
+    if (q.type === "select") {
+      const opt = (q.options || []).find((o) => o.id === raw)
+      if (opt) display = opt.label
+    }
+    return `- ${q.label}：${display || "（未填写）"}`
+  })
+  const text = "以下是我的回答：\n" + lines.join("\n")
+  emit("submit", text, { ...answers })
 }
 
 function onCancel() {
