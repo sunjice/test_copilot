@@ -1,7 +1,7 @@
 <template>
-  <!-- 收起状态：可拖动悬浮按钮 -->
+  <!-- 收起状态：可拖动悬浮按钮（AI Chat 独立页隐藏） -->
   <div
-    v-if="!isOpen"
+    v-if="!isOpen && !hideCollapsed"
     ref="collapsedRef"
     class="layout-chat-collapsed"
     :style="collapsedStyle"
@@ -11,9 +11,9 @@
     <span class="collapsed-label">AI</span>
   </div>
 
-  <!-- 展开状态：浮窗 or 抽屉 -->
+  <!-- 展开状态：浮窗 or 抽屉（AI Chat 独立页隐藏） -->
   <div
-    v-else
+    v-else-if="!hideCollapsed"
     :class="['chat-panel', viewMode === 'drawer' ? 'chat-panel-drawer' : 'chat-panel-float']"
     :style="viewMode === 'float' ? floatStyle : { width: drawerWidth + 'px' }"
   >
@@ -102,8 +102,7 @@
             <el-icon :size="26" color="var(--el-color-primary)"><ChatDotRound /></el-icon>
           </div>
           <h2 class="welcome-title">{{ welcomeTitle }}</h2>
-          <!-- <p class="welcome-subtitle">我可以帮你挑选核心用例、审核质量、完善用例等</p> -->
-          <p class="welcome-subtitle"> </p>
+          <p v-if="welcomeSubtitle" class="welcome-subtitle">{{ welcomeSubtitle }}</p>
 
           <div class="quick-actions">
             <div
@@ -339,6 +338,7 @@ const {
   streaming,
   segments,
   pageContext,
+  currentDomain,
   createSession,
   selectSession,
   updateSession,
@@ -350,8 +350,10 @@ const {
   confirmCreateTask,
   cancelTask,
   submitClarifyAnswers,
+  cancelClarify,
   viewDraft,
   init,
+  setDomain,
 } = useChat()
 
 // ── 聊天主体公共逻辑（历史面板/命令补全/发送/上下文/快捷卡片/会话操作/滚动） ──
@@ -361,16 +363,16 @@ const {
   inputRef, slashIndex, slashKeyword, filteredSkills, showSlashPanel,
   skillLabel, onSlashSelect, onKeydown,
   send, onStop, onRetry,
-  showContextBar, welcomeTitle, contextBarItems, inputPlaceholder,
+  showContextBar, welcomeTitle, welcomeSubtitle, contextBarItems, inputPlaceholder,
   quickActions, onQuickSend,
   newSession,
   onViewDraft, onConfirmDraft, onConfirmTask, onCancelTask, onSubmitClarify,
   userScrolledUp, showScrollBottom, onMsgScroll, scrollToBottom,
 } = useChatPanel({
-  sessions, activeSessionId, messages, skills, streaming, segments, pageContext,
+  sessions, activeSessionId, messages, skills, streaming, segments, pageContext, currentDomain,
   createSession, selectSession, updateSession, deleteSession,
   sendMessage, stopGeneration, retryLastMessage, confirmDraft, confirmCreateTask, cancelTask,
-  submitClarifyAnswers, viewDraft,
+  submitClarifyAnswers, cancelClarify, viewDraft,
   text, msgListRef,
 })
 
@@ -425,6 +427,24 @@ function onDrawerResizeEnd() {
   document.removeEventListener("mousemove", onDrawerResizeMove)
   document.removeEventListener("mouseup", onDrawerResizeEnd)
 }
+
+// ── 从路由推导当前域：/ai-chat → kb（独立知识库页），其余 → case ──
+function deriveDomain(path: string): string {
+  if (path.startsWith("/ai-chat")) return "kb"
+  return "case"
+}
+
+// AI Chat 独立页隐藏 LayoutChat（浮标 + 展开面板），避免与页内 ChatPanel 重复
+const hideCollapsed = computed(() => currentDomain.value === "kb")
+
+// ── 监听路由切换域（软隔离状态桶，切域不中断流式） ──
+watch(
+  () => route.fullPath,
+  (path) => {
+    setDomain(deriveDomain(path))
+  },
+  { immediate: true }
+)
 
 // ── 监听路由/Store，同步页面上下文（route query 优先） ──
 watch(

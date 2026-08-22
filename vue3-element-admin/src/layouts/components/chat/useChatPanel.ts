@@ -1,11 +1,10 @@
-import { ref, shallowRef, watch, nextTick, computed, type Ref } from "vue"
+import { ref, watch, nextTick, computed, type Ref } from "vue"
 import { ElMessage, ElMessageBox } from "element-plus"
 import {
-  FolderChecked, DocumentChecked, EditPen, View, Search,
-  Grid, Opportunity, Collection,
+  FolderChecked, DocumentChecked, Grid, Opportunity, Collection,
 } from "@element-plus/icons-vue"
-import { TASK_TYPE_MAP } from "@/views/aitc/constants"
 import type { ChatSession, SkillInfo, Part } from "@/api/chat/types"
+import { getDomainProfile, resolveSkillLabel, type QuickAction } from "./domainProfiles"
 
 /**
  * 聊天面板公共逻辑（LayoutChat 与 ai-chat/ChatPanel 共用）。
@@ -23,6 +22,7 @@ export function useChatPanel(deps: {
   streaming: Ref<boolean>
   segments: Ref<Part[]>
   pageContext: Ref<Record<string, any>>
+  currentDomain: Ref<string>
   // useChat actions
   createSession: () => Promise<any>
   selectSession: (id: number) => Promise<void>
@@ -42,12 +42,15 @@ export function useChatPanel(deps: {
   msgListRef: Ref<HTMLElement | undefined>
 }) {
   const {
-    sessions, activeSessionId, messages, skills, streaming, segments, pageContext,
+    sessions, activeSessionId, messages, skills, streaming, segments, pageContext, currentDomain,
     createSession, selectSession, updateSession, deleteSession,
     sendMessage, stopGeneration, retryLastMessage, confirmDraft, confirmCreateTask, cancelTask,
     submitClarifyAnswers, cancelClarify, viewDraft,
     text, msgListRef,
   } = deps
+
+  // ── 域 Profile（按 currentDomain 动态驱动 UI） ──
+  const domainProfile = computed(() => getDomainProfile(currentDomain.value))
 
   // ── 历史面板 ──
   const showHistory = ref(false)
@@ -178,7 +181,11 @@ export function useChatPanel(deps: {
   })
 
   const showSlashPanel = computed(
-    () => slashKeyword.value !== null && !slashClosed.value && !streaming.value
+    () =>
+      domainProfile.value.showSlash &&
+      slashKeyword.value !== null &&
+      !slashClosed.value &&
+      !streaming.value
   )
 
   watch(slashKeyword, () => {
@@ -189,16 +196,8 @@ export function useChatPanel(deps: {
     if (!v.startsWith("/")) slashClosed.value = false
   })
 
-  const SKILL_LABELS: Record<string, string> = {
-    core_select: "挑选核心用例",
-    case_review: "审核用例质量",
-    script_gen: "生成测试脚本",
-    case_complete: "完善测试用例",
-    case_design: "设计测试用例",
-  }
-
   function skillLabel(name: string): string {
-    return SKILL_LABELS[name] || TASK_TYPE_MAP[name]?.label || name
+    return resolveSkillLabel(currentDomain.value, name)
   }
 
   function onSlashSelect(s: SkillInfo) {
@@ -246,7 +245,13 @@ export function useChatPanel(deps: {
 
   // ── 上下文显示行 ──
   const showContextBar = ref(true)
-  const welcomeTitle = computed(() => "有什么我能帮你的吗？")
+  const welcomeTitle = computed(() => domainProfile.value.welcomeTitle)
+  const welcomeSubtitle = computed(() => domainProfile.value.welcomeSubtitle)
+
+  // 切域时按 profile 重置上下文栏开关（kb 域无业务上下文，恒关）
+  watch(currentDomain, (d) => {
+    showContextBar.value = getDomainProfile(d).showContextBar
+  }, { immediate: true })
 
   interface ContextItem {
     label: string
@@ -285,44 +290,10 @@ export function useChatPanel(deps: {
     return items
   })
 
-  const inputPlaceholder = computed(() => `提问，或输入 "/" 触发任务命令`)
+  const inputPlaceholder = computed(() => domainProfile.value.inputPlaceholder)
 
-  // ── 快捷提问卡片 ──
-  interface QuickAction {
-    title: string
-    desc: string
-    prompt: string
-    skill: string
-    icon: any
-    bg: string
-  }
-
-  const quickActions = shallowRef<QuickAction[]>([
-    {
-      title: "挑选核心用例",
-      desc: "从当前模块智能挑选最重要的用例",
-      prompt: "/core_select 帮我挑选核心用例",
-      skill: "core_select",
-      icon: Search,
-      bg: "linear-gradient(135deg, #e0f2fe 0%, #bae6fd 100%)",
-    },
-    {
-      title: "审核用例质量",
-      desc: "检查字段完整性和步骤规范性",
-      prompt: "/case_review 审核用例质量",
-      skill: "case_review",
-      icon: View,
-      bg: "linear-gradient(135deg, #dcfce7 0%, #bbf7d0 100%)",
-    },
-    {
-      title: "完善测试用例",
-      desc: "自动补全用例的缺失字段和测试步骤",
-      prompt: "/case_complete 完善测试用例",
-      skill: "case_complete",
-      icon: EditPen,
-      bg: "linear-gradient(135deg, #ffedd5 0%, #fed7aa 100%)",
-    },
-  ])
+  // ── 快捷提问卡片（按域 profile 动态） ──
+  const quickActions = computed(() => domainProfile.value.quickActions)
 
   async function onQuickSend(action: QuickAction) {
     if (streaming.value) return
@@ -402,7 +373,7 @@ export function useChatPanel(deps: {
     // 发送/停止/重试
     send, onStop, onRetry,
     // 上下文
-    showContextBar, welcomeTitle, contextBarItems, inputPlaceholder,
+    showContextBar, welcomeTitle, welcomeSubtitle, contextBarItems, inputPlaceholder,
     // 快捷卡片
     quickActions, onQuickSend,
     // 会话操作

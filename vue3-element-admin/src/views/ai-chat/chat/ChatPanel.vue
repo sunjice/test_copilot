@@ -1,68 +1,17 @@
 <template>
   <div class="ai-chat-panel">
-    <!-- 顶部工具栏：与下方内容融为一体，仅承载操作按钮 -->
-    <div class="chat-panel-header">
-      <!-- 历史面板模式：返回 + 删除所有 -->
-      <div v-if="showHistory" class="header-title">
-        <el-button text @click="showHistory = false">
-          <el-icon><ArrowLeft /></el-icon>
-          返回
-        </el-button>
-        <span>历史对话</span>
-      </div>
-      <div v-else class="header-spacer"></div>
+    <!-- 左侧会话侧边栏 -->
+    <SessionSidebar
+      :sessions="sessions"
+      :active-session-id="activeSessionId"
+      @new-chat="newSession"
+      @select="selectSession"
+      @rename="onRenameSession"
+      @delete="onDeleteSession"
+    />
 
-      <div class="header-actions">
-        <el-button v-if="showHistory" type="danger" text size="small" @click="onDeleteAll">
-          <el-icon><Delete /></el-icon>
-          删除所有
-        </el-button>
-        <template v-else>
-          <el-button text circle title="历史对话" @click="showHistory = true">
-            <el-icon><Clock /></el-icon>
-          </el-button>
-          <el-button text circle title="新对话" @click="newSession">
-            <el-icon><Plus /></el-icon>
-          </el-button>
-        </template>
-      </div>
-    </div>
-
-    <!-- 历史会话面板 -->
-    <template v-if="showHistory">
-      <div class="history-search-bar">
-        <el-input
-          v-model="historyKeyword"
-          placeholder="搜索历史对话"
-          clearable
-          :prefix-icon="Search"
-          size="small"
-        />
-      </div>
-      <div class="history-list">
-        <template v-if="groupedSessions.length">
-          <div v-for="group in groupedSessions" :key="group.label" class="history-group">
-            <div class="history-group-label">{{ group.label }}</div>
-            <div
-              v-for="s in group.sessions"
-              :key="s.id!"
-              class="history-item"
-              @click="onHistorySelect(s.id!)"
-            >
-              <el-icon class="history-item-icon"><ChatDotRound /></el-icon>
-              <span class="history-item-title" :title="s.title">{{ s.title }}</span>
-              <span class="history-item-time">{{ formatHistoryTime(s.update_time) }}</span>
-              <el-icon class="history-item-action" title="重命名" @click.stop="onRenameSession(s)"><Edit /></el-icon>
-              <el-icon class="history-item-action" title="删除" @click.stop="onDeleteSession(s)"><Delete /></el-icon>
-            </div>
-          </div>
-        </template>
-        <el-empty v-else description="暂无历史对话" :image-size="50" />
-      </div>
-    </template>
-
-    <!-- 正常聊天区域 -->
-    <template v-else>
+    <!-- 主区：聊天 -->
+    <div class="ai-chat-main">
       <!-- 消息列表 -->
       <div
         ref="msgListRef"
@@ -74,7 +23,7 @@
             <el-icon :size="26" color="var(--el-color-primary)"><ChatDotRound /></el-icon>
           </div>
           <h2 class="welcome-title">{{ welcomeTitle }}</h2>
-          <p class="welcome-subtitle"> </p>
+          <p v-if="welcomeSubtitle" class="welcome-subtitle">{{ welcomeSubtitle }}</p>
 
           <div class="quick-actions">
             <div
@@ -221,24 +170,25 @@
           </el-button>
         </div>
       </div>
-    </template>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, watch, nextTick, computed, onMounted } from "vue"
 import { useRouter } from "vue-router"
+import { ElMessage } from "element-plus"
 import {
-  ChatDotRound, Plus, Promotion, ArrowLeft, ArrowDown, Clock, Delete, Search, Edit,
+  ChatDotRound, Promotion, ArrowDown,
   Location, Close, VideoPause,
 } from "@element-plus/icons-vue"
 import ChatMessage from "@/layouts/components/chat/ChatMessage.vue"
 import TaskListPanel from "@/layouts/components/chat/TaskListPanel.vue"
 import StreamingBubble from "@/layouts/components/chat/StreamingBubble.vue"
+import SessionSidebar from "./SessionSidebar.vue"
 import { useChat } from "@/layouts/components/chat/useChat"
 import { useChatPanel } from "@/layouts/components/chat/useChatPanel"
 import { useInputResize } from "@/layouts/components/chat/useChatResize"
-import { formatHistoryTime } from "@/layouts/components/chat/utils"
 import { useAiContextStore } from "@/stores/aiContext"
 
 const text = ref("")
@@ -252,6 +202,7 @@ const {
   streaming,
   segments,
   pageContext,
+  currentDomain,
   createSession,
   selectSession,
   updateSession,
@@ -263,29 +214,43 @@ const {
   confirmCreateTask,
   cancelTask,
   submitClarifyAnswers,
+  cancelClarify,
   viewDraft,
   init,
+  setDomain,
 } = useChat()
 
-// ── 聊天主体公共逻辑（历史面板/命令补全/发送/上下文/快捷卡片/会话操作/滚动） ──
+// ── 聊天主体公共逻辑（命令补全/发送/上下文/快捷卡片/会话操作/滚动） ──
 const {
-  showHistory, historyKeyword, filteredSessions, groupedSessions,
-  onHistorySelect, onRenameSession, onDeleteSession, onDeleteAll,
   inputRef, slashIndex, slashKeyword, filteredSkills, showSlashPanel,
   skillLabel, onSlashSelect, onKeydown,
   send, onStop, onRetry,
-  showContextBar, welcomeTitle, contextBarItems, inputPlaceholder,
+  showContextBar, welcomeTitle, welcomeSubtitle, contextBarItems, inputPlaceholder,
   quickActions, onQuickSend,
   newSession,
   onViewDraft, onConfirmDraft, onConfirmTask, onCancelTask, onSubmitClarify, onCancelClarify,
   userScrolledUp, showScrollBottom, onMsgScroll, scrollToBottom,
 } = useChatPanel({
-  sessions, activeSessionId, messages, skills, streaming, segments, pageContext,
+  sessions, activeSessionId, messages, skills, streaming, segments, pageContext, currentDomain,
   createSession, selectSession, updateSession, deleteSession,
   sendMessage, stopGeneration, retryLastMessage, confirmDraft, confirmCreateTask, cancelTask,
-  submitClarifyAnswers, viewDraft,
+  submitClarifyAnswers, cancelClarify, viewDraft,
   text, msgListRef,
 })
+
+// ── 侧边栏会话操作（适配 SessionSidebar 的 emit 签名） ──
+async function onRenameSession(id: number, title: string) {
+  await updateSession(id, { title })
+}
+
+async function onDeleteSession(id: number) {
+  if (activeSessionId.value === id) {
+    const rest = sessions.value.filter((x) => x.id !== id)
+    if (rest.length) await selectSession(rest[0].id!)
+  }
+  await deleteSession(id)
+  ElMessage.success("已删除")
+}
 
 // 是否有任务（消息 parts 里的 confirm_card part 带 task_id，或 task_card 消息）
 const hasTasks = computed(() =>
@@ -314,15 +279,16 @@ function restoreScrollPosition() {
   }
 }
 
-// ── 初始化：只加载会话列表，不自动选中任何历史会话（每次进入都是新对话） ──
+// ── 初始化：切到 kb 域，只加载会话列表，不自动选中任何历史会话（每次进入都是新对话） ──
 onMounted(async () => {
+  setDomain("kb")
   await init()
   await nextTick()
   scrollToBottom()
 })
 
 // 暴露方法/状态，供父组件（左侧工作区顶部按钮）调用
-defineExpose({ scrollToBottom, restoreScrollPosition, saveScrollPosition, newSession, showHistory })
+defineExpose({ scrollToBottom, restoreScrollPosition, saveScrollPosition, newSession })
 
 // ── 同步上下文到 pageContext（从 aiContextStore 读取） ──
 const aiContextStore = useAiContextStore()
@@ -353,65 +319,19 @@ const { inputHeight, onInputMouseDown } = useInputResize()
 <style scoped>
 .ai-chat-panel {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   height: 100%;
   min-height: 0;
   overflow: hidden;
   background: var(--el-bg-color);
 }
 
-.chat-panel-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 8px 12px;
-  /* 与下方内容区融为一体：无边框、无背景差异 */
-  border-bottom: none;
-  background: transparent;
-  flex-shrink: 0;
-  user-select: none;
-  min-height: 40px;
-}
-
-.header-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-weight: 600;
-  font-size: 14px;
-  color: var(--el-text-color-primary);
-}
-
-/* 非历史模式下的占位，保证按钮靠右 */
-.header-spacer {
+.ai-chat-main {
   flex: 1;
-}
-
-.header-actions {
+  min-width: 0;
   display: flex;
-  gap: 0;
-}
-
-.header-actions :deep(.el-button) {
-  height: 26px;
-  padding: 0;
-  margin: 0;
-  border: none;
-}
-
-.header-actions :deep(.el-button.is-circle) {
-  width: 26px;
-  min-width: 26px;
-}
-
-.header-actions :deep(.el-button .el-icon) {
-  font-size: 14px;
-  margin: 0;
-}
-
-.header-actions :deep(.el-button--small) {
-  font-size: 11px;
-  height: 24px;
+  flex-direction: column;
+  position: relative;
 }
 
 .chat-panel-messages {
@@ -695,82 +615,6 @@ const { inputHeight, onInputMouseDown } = useInputResize()
 @keyframes stopPulse {
   0%, 100% { box-shadow: 0 0 0 0 var(--el-color-danger-light-5); }
   50% { box-shadow: 0 0 0 4px var(--el-color-danger-light-7); }
-}
-
-/* 历史面板 */
-.history-search-bar {
-  padding: 6px 8px;
-  border-bottom: 1px solid var(--el-border-color-lighter);
-  flex-shrink: 0;
-}
-
-.history-list {
-  flex: 1;
-  overflow-y: auto;
-  padding: 4px 0;
-}
-
-.history-group {
-  margin-bottom: 2px;
-}
-
-.history-group-label {
-  padding: 4px 10px;
-  font-size: 10px;
-  color: var(--el-text-color-secondary);
-}
-
-.history-item {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  padding: 6px 10px;
-  cursor: pointer;
-  transition: background 0.15s;
-}
-
-.history-item:hover {
-  background: var(--el-fill-color-light);
-}
-
-.history-item-icon {
-  font-size: 13px;
-  color: var(--el-text-color-secondary);
-  flex-shrink: 0;
-}
-
-.history-item-title {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 12px;
-}
-
-.history-item-time {
-  font-size: 10px;
-  color: var(--el-text-color-placeholder);
-  flex-shrink: 0;
-}
-
-.history-item-action {
-  font-size: 12px;
-  color: var(--el-text-color-placeholder);
-  cursor: pointer;
-  flex-shrink: 0;
-  padding: 1px;
-  border-radius: 3px;
-  transition: color 0.15s, background 0.15s;
-  display: none;
-}
-
-.history-item:hover .history-item-action {
-  display: inline-flex;
-}
-
-.history-item-action:hover {
-  color: var(--el-color-primary);
-  background: var(--el-fill-color);
 }
 
 .fill-textarea {

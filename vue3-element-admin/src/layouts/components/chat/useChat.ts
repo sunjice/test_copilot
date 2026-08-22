@@ -54,7 +54,64 @@ export function useChat() {
   const loadingSessions = ref(false)
   const loadingMessages = ref(false)
   const pageContext = ref<Record<string, any>>({})  // 页面上下文（projectId/suiteId 等）
+  /** 当前对话域（case/bug/exec/kb），默认 case。切域由外部调用 setDomain 驱动。 */
+  const currentDomain = ref("case")
   let abortController: AbortController | null = null  // 用于中断流式请求
+
+  /** 每域聊天 UI 状态桶（软隔离）。切域时保存当前域状态、恢复目标域状态，互不干扰。 */
+  interface DomainState {
+    activeSessionId: number | null
+    messages: ChatMessage[]
+    segments: Part[]
+    streaming: boolean
+    activeDraft: ChatDraft | null
+    showDraftPanel: boolean
+  }
+  const domainState = reactive<Record<string, DomainState>>({})
+
+  function snapshotDomainState(domain: string): DomainState {
+    return {
+      activeSessionId: activeSessionId.value,
+      messages: messages.value,
+      segments: segments.value,
+      streaming: streaming.value,
+      activeDraft: activeDraft.value,
+      showDraftPanel: showDraftPanel.value,
+    }
+  }
+
+  function emptyDomainState(): DomainState {
+    return {
+      activeSessionId: null,
+      messages: [],
+      segments: [],
+      streaming: false,
+      activeDraft: null,
+      showDraftPanel: false,
+    }
+  }
+
+  function applyDomainState(s: DomainState) {
+    activeSessionId.value = s.activeSessionId
+    messages.value = s.messages
+    segments.value = s.segments
+    streaming.value = s.streaming
+    activeDraft.value = s.activeDraft
+    showDraftPanel.value = s.showDraftPanel
+  }
+
+  /** 切换当前域：软隔离状态桶。不 abort 进行中的流式任务，任务后台继续、结果归位到发起域。
+   *  切域时重新拉取该域技能列表与会话列表（均按域过滤）。 */
+  function setDomain(domain: string) {
+    if (currentDomain.value === domain) return
+    // 保存当前域状态（含进行中的 segments/streaming 快照，供后台流式归位）
+    domainState[currentDomain.value] = snapshotDomainState(currentDomain.value)
+    // 切换到目标域
+    currentDomain.value = domain
+    applyDomainState(domainState[domain] ?? emptyDomainState())
+    loadSkills(domain)
+    loadSessions(domain)
+  }
 
   // ── 计算属性 ──
   const activeSession = computed(() =>
@@ -70,10 +127,11 @@ export function useChat() {
   )
 
   // ── 会话 ──
-  async function loadSessions() {
+  async function loadSessions(domain?: string) {
     loadingSessions.value = true
     try {
-      sessions.value = await ChatSessionAPI.list()
+      // 按域过滤（后端 SQL 过滤，权威可靠）；不传 domain 时用当前域
+      sessions.value = await ChatSessionAPI.list(domain ?? currentDomain.value)
     } catch {
       // 静默处理
     } finally {
@@ -84,7 +142,7 @@ export function useChat() {
   async function createSession(title?: string, contextJson?: Record<string, any>) {
     const session = await ChatSessionAPI.create({
       title: title || "新对话",
-      domain: "case",
+      domain: currentDomain.value,
       context_json: contextJson,
     })
     sessions.value.unshift(session)
@@ -171,6 +229,13 @@ export function useChat() {
       if (m) skill = m[1]
     }
 
+    // 绑定「发起时 domain 快照」：流式全程写 startDomain 对应的状态桶，
+    // 防止流式返回中途切域导致回写错桶（见文档 1.3 第 4 点）。
+    const startDomain = currentDomain.value
+    // 局部数组引用：不切域时与 ref 同引用（响应式生效）；切域后仍指向发起域旧数组，保证后台归位正确。
+    const msgs = messages.value
+    const segs = segments.value
+
     if (!activeSessionId.value) {
       // 自动创建会话，带上页面上下文
       const session = await createSession(undefined, { ...pageContext.value })
@@ -180,12 +245,12 @@ export function useChat() {
     // 同步当前页面上下文到后端会话（用户可能切换了项目/模块）
     const ctx = pageContext.value
     if (ctx && Object.keys(ctx).length > 0 && activeSessionId.value) {
-      await ChatContextAPI.set(activeSessionId.value, { context_json: ctx }).catch(() => {})
+      await ChatContextAPI.set(activeSessionId.value, { domain: startDomain, context_json: ctx }).catch(() => {})
     }
 
     const sessionId = activeSessionId.value!
 
-    // 添加用户消息到本地
+    // 添加用户消息到本地（写入发起域数组）
     const userMsg: ChatMessage = {
       id: null,
       session_id: sessionId,
@@ -196,10 +261,11 @@ export function useChat() {
       draft_id: null,
       create_time: new Date().toISOString(),
     }
-    addLocalMessage(userMsg)
+    msgs.push(userMsg)
 
     streaming.value = true
-    segments.value = []
+    // 原地清空（保持 segments.value 与局部 segs 引用一致，确保流式内容实时渲染）
+    segs.length = 0
 
     // 创建新的 AbortController
     abortController = new AbortController()
@@ -253,15 +319,15 @@ export function useChat() {
                 case "thinking":
                   // 思考内容流式推送：追加到末尾 thinking 区块（若末尾非 thinking 则新建）
                   if (data.content) {
-                    appendThinking(segments.value, data.content)
-                  } else if (segments.value.length === 0 || !lastPart(segments.value)?.type.includes("thinking")) {
+                    appendThinking(segs, data.content)
+                  } else if (segs.length === 0 || !lastPart(segs)?.type.includes("thinking")) {
                     // Agent 初始心跳：创建思考区块
-                    segments.value.push({ type: "thinking", content: "" })
+                    segs.push({ type: "thinking", content: "" })
                   }
                   break
 
                 case "chunk":
-                  appendText(segments.value, data.content || "")
+                  appendText(segs, data.content || "")
                   break
 
                 case "skill_start":
@@ -270,7 +336,7 @@ export function useChat() {
 
                 case "tool_start":
                   // 工具开始执行 → 新建 running 工具区块（id 用 run_id 精确关联）
-                  segments.value.push({
+                  segs.push({
                     type: "tool",
                     id: data.run_id || data.id || `tool-${Date.now()}`,
                     name: data.name || "处理中",
@@ -283,8 +349,8 @@ export function useChat() {
                   {
                     const runId = data.run_id || data.id || ""
                     let settled = false
-                    for (let i = segments.value.length - 1; i >= 0; i--) {
-                      const seg = segments.value[i]
+                    for (let i = segs.length - 1; i >= 0; i--) {
+                      const seg = segs[i]
                       if (seg.type === "tool" && seg.status === "running") {
                         if (runId && seg.id === runId) {
                           seg.status = data.error ? "failed" : "done"
@@ -297,8 +363,8 @@ export function useChat() {
                     }
                     if (!settled) {
                       // 兜底：run_id 缺失时结算最后一个 running 工具
-                      for (let i = segments.value.length - 1; i >= 0; i--) {
-                        const seg = segments.value[i]
+                      for (let i = segs.length - 1; i >= 0; i--) {
+                        const seg = segs[i]
                         if (seg.type === "tool" && seg.status === "running") {
                           seg.status = data.error ? "failed" : "done"
                           seg.durationMs = data.durationMs ?? 0
@@ -350,8 +416,8 @@ export function useChat() {
         const cm = collectedMessage
         const meta: Record<string, any> = { ...(cm.metadata || {}) }
         // 后端 message 已带 parts（单一事实来源），直接用
-        if (!meta.parts && segments.value.length) {
-          meta.parts = JSON.parse(JSON.stringify(segments.value))
+        if (!meta.parts && segs.length) {
+          meta.parts = JSON.parse(JSON.stringify(segs))
         }
         if (!meta.skill_name && (cm.skill_name || skillName)) {
           meta.skill_name = cm.skill_name || skillName
@@ -371,7 +437,7 @@ export function useChat() {
           draft_id: draftId,
           create_time: new Date().toISOString(),
         }
-        addLocalMessage(assistantMsg)
+        msgs.push(assistantMsg)
 
         // 如果有草稿数据，打开草稿面板
         if (cm.draft_type && cm.draft_data) {
@@ -389,9 +455,9 @@ export function useChat() {
           }
           showDraftPanel.value = true
         }
-      } else if (assistantContent || segments.value.some(s => s.type === "text" && s.content)) {
+      } else if (assistantContent || segs.some(s => s.type === "text" && s.content)) {
         // 无 message 事件（兜底）：从 parts 中提取纯文本拼接
-        const textFromParts = segments.value
+        const textFromParts = segs
           .filter((s): s is Part & { type: "text" } => s.type === "text")
           .map((s) => s.content)
           .join("")
@@ -402,15 +468,15 @@ export function useChat() {
           role: "assistant",
           msg_type: assistantMsgType,
           content: assistantContent || textFromParts,
-          metadata_json: segments.value.length
-            ? { parts: JSON.parse(JSON.stringify(segments.value)) }
+          metadata_json: segs.length
+            ? { parts: JSON.parse(JSON.stringify(segs)) }
             : skillName
               ? { skill_name: skillName }
               : null,
           draft_id: draftId,
           create_time: new Date().toISOString(),
         }
-        addLocalMessage(assistantMsg)
+        msgs.push(assistantMsg)
 
         // 如果有草稿数据，打开草稿面板
         if (draftType && draftData) {
@@ -430,7 +496,18 @@ export function useChat() {
         }
       }
 
-      segments.value = []
+      // 流式归位：把最终结果写回发起域状态桶（切域后 ref 已指向目标域，需写回 domainState）
+      if (startDomain === currentDomain.value) {
+        // 未切域：ref 即发起域，segments 已消费完，清空即可
+        segments.value = []
+      } else {
+        // 已切域：把 messages/segments 归位到发起域，并标记该域流式已结束
+        const ds = domainState[startDomain] ?? emptyDomainState()
+        ds.messages = msgs
+        ds.segments = []
+        ds.streaming = false
+        domainState[startDomain] = ds
+      }
 
       // 刷新会话列表（更新消息计数和时间）
       await loadSessions()
@@ -438,14 +515,14 @@ export function useChat() {
       // 如果是用户主动中断，不显示错误
       if (e.name === "AbortError") {
         // 保留已输出的部分内容作为消息
-        if (segments.value.length) {
-          const textFromParts = segments.value
+        if (segs.length) {
+          const textFromParts = segs
             .filter((s): s is Part & { type: "text" } => s.type === "text")
             .map((s) => s.content)
             .join("")
 
           if (textFromParts) {
-            const parts = JSON.parse(JSON.stringify(segments.value))
+            const parts = JSON.parse(JSON.stringify(segs))
             const md: Record<string, any> = {
               parts,
             }
@@ -466,7 +543,7 @@ export function useChat() {
               draft_id: null,
               create_time: new Date().toISOString(),
             }
-            addLocalMessage(partialMsg)
+            msgs.push(partialMsg)
           }
         }
       } else {
@@ -484,7 +561,16 @@ export function useChat() {
           draft_id: null,
           create_time: new Date().toISOString(),
         }
-        addLocalMessage(errMsg)
+        msgs.push(errMsg)
+      }
+
+      // 异常/中断也要归位到发起域
+      if (startDomain !== currentDomain.value) {
+        const ds = domainState[startDomain] ?? emptyDomainState()
+        ds.messages = msgs
+        ds.segments = []
+        ds.streaming = false
+        domainState[startDomain] = ds
       }
     } finally {
       streaming.value = false
@@ -683,7 +769,7 @@ export function useChat() {
         card_seq: cardSeq,
       })
 
-      const taskIds: number[] = res.task_ids ?? (res.task_id != null ? [res.task_id] : [])
+      const taskIds: number[] = res.task_ids ?? []
       const total = res.total_count ?? metadata.total ?? 0
 
       // 回写本地卡片 part：标记已确认 + 写入任务字段
@@ -822,9 +908,9 @@ export function useChat() {
   }
 
   // ── 技能 ──
-  async function loadSkills() {
+  async function loadSkills(domain?: string) {
     try {
-      skills.value = await ChatSkillAPI.list()
+      skills.value = await ChatSkillAPI.list(domain ?? currentDomain.value)
     } catch {
       skills.value = []
     }
@@ -832,7 +918,7 @@ export function useChat() {
 
   // ── 初始化 ──
   async function init() {
-    await Promise.all([loadSessions(), loadSkills()])
+    await Promise.all([loadSessions(), loadSkills(currentDomain.value)])
   }
 
   return {
@@ -852,8 +938,11 @@ export function useChat() {
     activeDraft,
     showDraftPanel,
     pageContext,
+    currentDomain,
+    domainState,
 
     // 方法
+    setDomain,
     loadSessions,
     createSession,
     selectSession,
