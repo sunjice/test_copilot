@@ -81,3 +81,21 @@ with urllib.request.urlopen(url) as resp:
 
 - XML-RPC 接口：新增函数并用 `@dispatcher.register_function` 注册
 - Web API 接口：在 `MockTestLinkHandler` 中新增对应的 `do_GET`/`do_POST` 处理逻辑
+
+## 字段映射
+
+TestLink 返回字段与本地 `AiTcCase` 字段的映射关系（定义于 `app/aitc/testlink/field_map.py`）：
+
+| TestLink 字段 | 本地 AiTcCase 字段 | 说明 |
+|------|------|------|
+| `item_a` | `purpose` | 测试项 / 目的 |
+| `idea_a` | `summary` | 测试思想 |
+| `summary` | `topo` | 拓扑标识（⚠️ TestLink 的 `summary` 是拓扑，非测试思想） |
+| `condition_a` | `preconditions` | 前置条件 |
+| `steps` | `steps` | 测试步骤（HTML 表格 → JSONB 结构化，见 parser.py） |
+| `expected_results` | （并入 steps） | 预期结果通常已并入 steps 表格 |
+| `name` | `name` | 用例名称 |
+| `case_id` | `external_id` | 用例 ID（如 `C-2185677`） |
+
+> ⚠️ 特别注意：TestLink 的 `summary` 字段语义是「拓扑标识」（如 `topo_lan_wan_usb_storage`），
+> 与本地 `summary`（测试思想）语义不同，映射时务必通过 `field_map.py`，勿散落硬编码。

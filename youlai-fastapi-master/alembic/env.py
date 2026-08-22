@@ -43,6 +43,7 @@ from app.aitc.sample import models as aitc_sample_models  # noqa: F401,E402
 from app.aitc.script import models as aitc_script_models  # noqa: F401,E402
 from app.aitc.spec import models as aitc_spec_models  # noqa: F401,E402
 from app.aitc.task import models as aitc_task_models  # noqa: F401,E402
+from app.aitc.testlink import models as aitc_testlink_models  # noqa: F401,E402
 
 from app.ai.llm_log import models as llm_log_models  # noqa: F401,E402
 from app.ai.chat import models as chat_models  # noqa: F401,E402

@@ -242,6 +242,11 @@ CREATE TABLE ai_tc_cases (
     testlink_modifier    varchar(128),
     auto_sync            smallint NOT NULL DEFAULT 1,
     sync_error           text,
+    summary_raw          text,
+    preconditions_raw    text,
+    steps_raw            text,
+    test_data_raw        text,
+    steps_parse_status   smallint NOT NULL DEFAULT 0,
     index_hash           varchar(64),
     indexed_at           timestamp,
     CONSTRAINT uq_ai_tc_cases_project_id_external_id UNIQUE (project_id, external_id)
@@ -284,11 +289,50 @@ COMMENT ON COLUMN ai_tc_cases.testlink_modified_at IS 'TestLink 端 modification
 COMMENT ON COLUMN ai_tc_cases.testlink_modifier IS 'TestLink 端最后修改人';
 COMMENT ON COLUMN ai_tc_cases.auto_sync IS '修改后是否自动反写 0-否 1-是';
 COMMENT ON COLUMN ai_tc_cases.sync_error IS '最近一次反写失败原因';
+COMMENT ON COLUMN ai_tc_cases.summary_raw IS '测试思想的原始 HTML';
+COMMENT ON COLUMN ai_tc_cases.preconditions_raw IS '前置条件的原始 HTML';
+COMMENT ON COLUMN ai_tc_cases.steps_raw IS '测试步骤的原始 HTML（整段）';
+COMMENT ON COLUMN ai_tc_cases.test_data_raw IS '测试数据的原始 HTML';
+COMMENT ON COLUMN ai_tc_cases.steps_parse_status IS '步骤结构化解析状态 0-未解析 1-解析成功 2-解析降级为纯文本';
 COMMENT ON COLUMN ai_tc_cases.index_hash IS '索引内容 SHA256';
 COMMENT ON COLUMN ai_tc_cases.indexed_at IS '最近一次索引时间';
 COMMENT ON COLUMN ai_tc_cases.create_time IS '创建时间';
 COMMENT ON COLUMN ai_tc_cases.update_time IS '更新时间';
 COMMENT ON COLUMN ai_tc_cases.is_deleted IS '逻辑删除 0-未删除 1-已删除';
+
+-- ==================== ai_tc_sync_logs ====================
+CREATE TABLE ai_tc_sync_logs (
+    id                   bigint PRIMARY KEY,
+    project_id           bigint NOT NULL,
+    case_id              bigint,
+    direction            varchar(16) NOT NULL,
+    action               varchar(32) NOT NULL,
+    status               smallint NOT NULL DEFAULT 1,
+    testlink_tc_id       varchar(64),
+    detail               text,
+    operator             varchar(64),
+    operated_at          timestamp,
+    create_time          timestamp DEFAULT now(),
+    update_time          timestamp DEFAULT now()
+);
+ALTER TABLE ai_tc_sync_logs ADD CONSTRAINT fk_ai_tc_synclog_project_id FOREIGN KEY (project_id) REFERENCES ai_tc_projects(id);
+ALTER TABLE ai_tc_sync_logs ADD CONSTRAINT fk_ai_tc_synclog_case_id FOREIGN KEY (case_id) REFERENCES ai_tc_cases(id);
+CREATE INDEX idx_aitc_synclog_project ON ai_tc_sync_logs (project_id);
+CREATE INDEX idx_aitc_synclog_case ON ai_tc_sync_logs (case_id);
+CREATE INDEX idx_aitc_synclog_direction ON ai_tc_sync_logs (direction, status);
+COMMENT ON TABLE ai_tc_sync_logs IS 'TestLink 同步/反写审计日志';
+COMMENT ON COLUMN ai_tc_sync_logs.id IS '主键ID';
+COMMENT ON COLUMN ai_tc_sync_logs.project_id IS '项目ID';
+COMMENT ON COLUMN ai_tc_sync_logs.case_id IS '用例ID（全量同步等无单用例时为 NULL）';
+COMMENT ON COLUMN ai_tc_sync_logs.direction IS '方向 pull(拉取) / push(反写)';
+COMMENT ON COLUMN ai_tc_sync_logs.action IS '操作 sync/push_case/conflict 等';
+COMMENT ON COLUMN ai_tc_sync_logs.status IS '结果 0-失败 1-成功';
+COMMENT ON COLUMN ai_tc_sync_logs.testlink_tc_id IS 'TestLink 用例 ID（如 C-2185677）';
+COMMENT ON COLUMN ai_tc_sync_logs.detail IS '详情/错误信息';
+COMMENT ON COLUMN ai_tc_sync_logs.operator IS '操作人（定时任务为 system）';
+COMMENT ON COLUMN ai_tc_sync_logs.operated_at IS '操作时间';
+COMMENT ON COLUMN ai_tc_sync_logs.create_time IS '创建时间';
+COMMENT ON COLUMN ai_tc_sync_logs.update_time IS '更新时间';
 
 -- ==================== ai_tc_samples ====================
 CREATE TABLE ai_tc_samples (

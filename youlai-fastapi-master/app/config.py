@@ -72,6 +72,12 @@ class Settings(BaseSettings):
     # ── 性能计时 ──
     TIMING_LOG_ENABLED: bool = True  # 控制 timing.log 是否启用
 
+    # ── TestLink 集成 ──
+    # provider: mock / xmlrpc / rest（当前仅 mock 可用，公司内实现后扩展）
+    TESTLINK_PROVIDER: str = "mock"
+    TESTLINK_BASE_URL: str = "http://127.0.0.1:8088"  # mock 服务地址
+    TESTLINK_API_KEY: str = ""  # 真实系统认证用
+
     # ── Elasticsearch ──
     ES_HOST: str = "http://tc-es:9200"
     ES_INDEX_CASE: str = "tc_cases"

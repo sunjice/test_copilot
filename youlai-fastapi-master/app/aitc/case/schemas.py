@@ -103,6 +103,12 @@ class CaseVO(BaseModel):
     topo: str | None = None
     test_data: str | None = None
     steps: list[CaseStep] = Field(default_factory=list)
+    # ── TestLink 原文（HTML 富文本），前端 v-html 渲染 ──
+    summary_raw: str | None = None
+    preconditions_raw: str | None = None
+    steps_raw: str | None = None
+    test_data_raw: str | None = None
+    steps_parse_status: int = 0
     importance: int = 2
     is_core: int = 0
     core_reason: str | None = None

@@ -27,14 +27,30 @@
         {{ coreSourceLabel(viewingCase.core_source) }}
       </el-descriptions-item>
       <el-descriptions-item label="核心理由" :span="2">{{ viewingCase.core_reason || '—' }}</el-descriptions-item>
-      <el-descriptions-item label="测试思想" :span="2">{{ viewingCase.summary || '—' }}</el-descriptions-item>
+      <el-descriptions-item label="测试思想" :span="2">
+        <div class="rich-text" v-html="renderHtml(viewingCase.summary_raw, viewingCase.summary)"></div>
+      </el-descriptions-item>
       <el-descriptions-item label="测试Topo" :span="2">{{ viewingCase.topo || '—' }}</el-descriptions-item>
-      <el-descriptions-item label="测试数据" :span="2">{{ viewingCase.test_data || '—' }}</el-descriptions-item>
-      <el-descriptions-item label="前置条件" :span="2">{{ viewingCase.preconditions || '—' }}</el-descriptions-item>
+      <el-descriptions-item label="测试数据" :span="2">
+        <div class="rich-text" v-html="renderHtml(viewingCase.test_data_raw, viewingCase.test_data)"></div>
+      </el-descriptions-item>
+      <el-descriptions-item label="前置条件" :span="2">
+        <div class="rich-text" v-html="renderHtml(viewingCase.preconditions_raw, viewingCase.preconditions)"></div>
+      </el-descriptions-item>
     </el-descriptions>
     <div class="mt-3">
-      <div class="font-bold mb-2 text-xs">测试步骤</div>
-      <el-table :data="viewingCase.steps" border size="small">
+      <div class="font-bold mb-2 text-xs flex items-center justify-between">
+        <span>测试步骤</span>
+        <el-switch
+          v-if="viewingCase.steps_raw"
+          v-model="showStepsRaw"
+          active-text="原文"
+          inactive-text="表格"
+          size="small"
+        />
+      </div>
+      <div v-if="showStepsRaw && viewingCase.steps_raw" class="rich-text" v-html="renderHtml(viewingCase.steps_raw, '')"></div>
+      <el-table v-else :data="viewingCase.steps" border size="small">
         <el-table-column prop="step_no" label="序号" width="60" />
         <el-table-column prop="action" label="操作步骤" />
         <el-table-column prop="expected" label="预期结果" />
@@ -44,8 +60,10 @@
 </template>
 
 <script setup lang="ts">
+import { ref } from "vue";
 import { ArrowLeft } from "@element-plus/icons-vue";
 import type { CaseVO } from "@/api/aitc/case";
+import { renderHtml } from "@/utils/sanitizeHtml";
 import { importanceLabel, importanceType, coreSourceLabel } from "../../constants";
 
 defineProps<{
@@ -56,4 +74,30 @@ defineEmits<{
   back: [];
   startEdit: [row: CaseVO];
 }>();
+
+// 步骤「原文/表格」切换
+const showStepsRaw = ref(false);
 </script>
+
+<style scoped>
+.rich-text {
+  font-size: 12px;
+  line-height: 1.6;
+  word-break: break-word;
+}
+
+.rich-text :deep(table) {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.rich-text :deep(table td),
+.rich-text :deep(table th) {
+  border: 1px solid #e4e7ed;
+  padding: 4px 8px;
+}
+
+.rich-text :deep(p) {
+  margin: 0 0 4px;
+}
+</style>

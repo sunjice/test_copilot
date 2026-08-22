@@ -36,6 +36,12 @@ export interface CaseVO {
   topo?: string;
   test_data?: string;
   steps: CaseStep[];
+  // TestLink 原文（HTML 富文本）
+  summary_raw?: string;
+  preconditions_raw?: string;
+  steps_raw?: string;
+  test_data_raw?: string;
+  steps_parse_status?: number;
   importance: number;
   is_core: number;
   core_reason?: string;
@@ -56,6 +62,12 @@ export interface CaseForm {
   topo?: string;
   test_data?: string;
   steps: CaseStep[];
+  // TestLink 原文（HTML 富文本）
+  summary_raw?: string;
+  preconditions_raw?: string;
+  steps_raw?: string;
+  test_data_raw?: string;
+  steps_parse_status?: number;
   importance: number;
 }
 

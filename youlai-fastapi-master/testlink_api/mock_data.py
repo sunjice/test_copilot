@@ -7,32 +7,59 @@
 """
 
 # get_case_detail 返回示例：key -> 用例详情
+# 注意：与 testlink.txt 真实返回一致，只有 6 个字段（无 case_id/name/version_id）！
+#   - name / case_id 来自 get_tree_nodes 的节点，不在此接口返回
+#   - steps 是带 CSS class/style 的真实富文本表格
 CASE_DETAILS = {
     "C2185677": {
-        "item_a": "<p>登录超时应失败</p>",
+        "item_a": "<p>登录超时应失败</p >",
         "idea_a": (
             "<p>验证FTPS服务登录超时机制是否正常生效。客户端建立FTPS连接后不进行登录认证，"
             "保持连接空闲至超过设备配置的登录超时时间，检查服务器是否主动断开连接；"
             "超时后继续进行登录操作应失败，重新建立FTPS连接后可正常登录，"
-            "确保设备能够及时释放空闲会话资源并保证服务正常运行。</p><p><br/></p>"
+            "确保设备能够及时释放空闲会话资源并保证服务正常运行。</p ><p><br/></p >"
         ),
         "summary": "topo_lan_wan_usb_storage",
         "condition_a": (
             "<p>样机接入移动硬盘，开启internet FTP服务，开启TLS加密；"
-            "wan PC的客户端工具为FileZilla。</p>"
+            "wan PC的客户端工具为FileZilla。</p >"
         ),
         "steps": (
-            "<table><tbody>"
-            "<tr><th>测试步骤</th><th>预期结果</th></tr>"
-            "<tr><td>1. 开启FTPS服务，使用FTPS客户端连接服务器，但不输入用户名和密码。</td>"
-            "<td>FTPS连接建立成功，服务器等待客户端进行身份认证。</td></tr>"
-            "<tr><td>2. 保持连接空闲至超过配置的登录超时时间。</td>"
-            "<td>服务器主动断开FTPS连接，超时会话被释放。</td></tr>"
-            "<tr><td>3. 在连接超时后继续输入用户名、密码并尝试登录。</td>"
-            "<td>登录失败，客户端提示连接已断开或会话已失效。</td></tr>"
-            "<tr><td>4. 重新建立FTPS连接并输入正确的用户名和密码登录。</td>"
-            "<td>FTPS登录成功，可正常访问文件并执行文件传输操作。</td></tr>"
-            "</tbody></table><p><br/></p>"
+            "<table class=\"___1vyiefv f1ddd56o f16vktn6 f1ahpp82 f11qra4b f1uinfot fibjyge "
+            "fvueend f9yszdx f1fu4s3n f3l3pb3 f10ghnd0 f8fmt76 fjvbh62 f1qrqxae f1vw5qpk "
+            "fc02sbz fxawf59 fymf513 f1aoyrul f1el8yx3 f1pymoxg f1ofu761 fe6itr f7coize "
+            "f1794535 f1o0pw0q fbjjl9v fk1v6el f16pyhcb f1ixlhx9 f12zef0i flu5r5u f19haqzy "
+            "f1owmcxx f1oddm8q f1004tna fcoaxci fh0ee9u f15v23i2 f1dmj53 f1r1gcv9 f14z1veh "
+            "ffufd3x f1ypplot f1660cg\" style=\"border-left: 1px solid rgb(102, 102, 102); "
+            "border-top: 1px solid rgb(102, 102, 102);\">"
+            "<tbody><tr class=\"firstRow\">"
+            "<th style=\"border-color: rgb(230, 230, 230); background-color: rgb(245, 245, 245);\">测试步骤</th>"
+            "<th style=\"border-color: rgb(230, 230, 230); background-color: rgb(245, 245, 245);\">预期结果</th></tr>"
+            "<tr><td style=\"border-color: rgb(230, 230, 230) rgb(102, 102, 102) rgb(102, 102, 102) rgb(230, 230, 230); "
+            "border-bottom-width: 1px; border-bottom-style: solid; border-right-width: 1px; border-right-style: solid; "
+            "padding: 5px;\">1. 开启FTPS服务，使用FTPS客户端连接服务器，但不输入用户名和密码。</td>"
+            "<td style=\"border-color: rgb(230, 230, 230) rgb(102, 102, 102) rgb(102, 102, 102) rgb(230, 230, 230); "
+            "border-bottom-width: 1px; border-bottom-style: solid; border-right-width: 1px; border-right-style: solid; "
+            "padding: 5px;\">FTPS连接建立成功，服务器等待客户端进行身份认证。</td></tr>"
+            "<tr><td style=\"border-color: rgb(230, 230, 230) rgb(102, 102, 102) rgb(102, 102, 102) rgb(230, 230, 230); "
+            "border-bottom-width: 1px; border-bottom-style: solid; border-right-width: 1px; border-right-style: solid; "
+            "padding: 5px;\">2. 保持连接空闲至超过配置的登录超时时间。</td>"
+            "<td style=\"border-color: rgb(230, 230, 230) rgb(102, 102, 102) rgb(102, 102, 102) rgb(230, 230, 230); "
+            "border-bottom-width: 1px; border-bottom-style: solid; border-right-width: 1px; border-right-style: solid; "
+            "padding: 5px;\">服务器主动断开FTPS连接，超时会话被释放。</td></tr>"
+            "<tr><td style=\"border-color: rgb(230, 230, 230) rgb(102, 102, 102) rgb(102, 102, 102) rgb(230, 230, 230); "
+            "border-bottom-width: 1px; border-bottom-style: solid; border-right-width: 1px; border-right-style: solid; "
+            "padding: 5px;\">3. 在连接超时后继续输入用户名、密码并尝试登录。</td>"
+            "<td style=\"border-color: rgb(230, 230, 230) rgb(102, 102, 102) rgb(102, 102, 102) rgb(230, 230, 230); "
+            "border-bottom-width: 1px; border-bottom-style: solid; border-right-width: 1px; border-right-style: solid; "
+            "padding: 5px;\">登录失败，客户端提示连接已断开或会话已失效。</td></tr>"
+            "<tr><td style=\"border-color: rgb(230, 230, 230) rgb(102, 102, 102) rgb(102, 102, 102) rgb(230, 230, 230); "
+            "border-bottom-width: 1px; border-bottom-style: solid; border-right-width: 1px; border-right-style: solid; "
+            "padding: 5px;\">4. 重新建立FTPS连接并输入正确的用户名和密码登录。</td>"
+            "<td style=\"border-color: rgb(230, 230, 230) rgb(102, 102, 102) rgb(102, 102, 102) rgb(230, 230, 230); "
+            "border-bottom-width: 1px; border-bottom-style: solid; border-right-width: 1px; border-right-style: solid; "
+            "padding: 5px;\">FTPS登录成功，可正常访问文件并执行文件传输操作。</td></tr>"
+            "</tbody></table><p><br/></p >"
         ),
         "expected_results": "",
     },

@@ -8,4 +8,5 @@ from app.aitc.sample.models import AiTcSample  # noqa: F401
 from app.aitc.script.models import AiTcScript  # noqa: F401
 from app.aitc.spec.models import AiTcSpec  # noqa: F401
 from app.aitc.task.models import AiTcTask, AiTcTaskItem, AiTcReviewRecord  # noqa: F401
+from app.aitc.testlink.models import AiTcSyncLog  # noqa: F401
 

@@ -55,6 +55,7 @@
         "axios": "^1.18.0",
         "codemirror": "^5.65.21",
         "codemirror-editor-vue3": "^2.8.0",
+        "dompurify": "^3.4.13",
         "echarts": "^6.1.0",
         "element-plus": "^2.14.2",
         "exceljs": "^4.4.0",

@@ -113,6 +113,16 @@ class AiTcCase(Base, BaseIdMixin, TimestampMixin, SoftDeleteMixin):
     )
     sync_error: Mapped[str | None] = mapped_column(Text, comment="最近一次反写失败原因")
 
+    # ── TestLink 原文（HTML 富文本，双轨：原文存库 + 清洗字段消费）──
+    summary_raw: Mapped[str | None] = mapped_column(Text, comment="测试思想的原始 HTML")
+    preconditions_raw: Mapped[str | None] = mapped_column(Text, comment="前置条件的原始 HTML")
+    steps_raw: Mapped[str | None] = mapped_column(Text, comment="测试步骤的原始 HTML（整段）")
+    test_data_raw: Mapped[str | None] = mapped_column(Text, comment="测试数据的原始 HTML")
+    steps_parse_status: Mapped[int] = mapped_column(
+        SmallInteger, default=0, server_default="0",
+        comment="步骤结构化解析状态 0-未解析 1-解析成功 2-解析降级为纯文本"
+    )
+
     # ── 检索引擎追踪 ──
     index_hash: Mapped[str | None] = mapped_column(String(64), comment="索引内容 SHA256，用于增量变更检测")
     indexed_at: Mapped[datetime | None] = mapped_column(DateTime, comment="最近一次索引时间")
